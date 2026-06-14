@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Body, status
@@ -8,11 +9,12 @@ import uuid
 from app.models_entity.teams import Submission
 from app.routes.auth import get_current_user
 from app.services.users import validate_competition_date
+from app.services.websocket_manager import manager
 
 router = APIRouter()
 
 @router.post("/create")
-async def create_competition(req: RequestCompetition):
+async def create_competition(req: RequestCompetition, _user: dict = Depends(get_current_user)):
     # Validación de campos obligatorios
     required_fields = ["title", "date", "status"]
     missing = [field for field in required_fields if not getattr(req, field, None)]
@@ -93,25 +95,23 @@ async def join_team_to_competition(
     if not competition:
         raise HTTPException(status_code=404, detail="Competición no encontrada para ese usuario")
 
-    teams = competition.get("teams", [])
-    if teamCode in teams:
-        raise HTTPException(status_code=400, detail="El equipo ya está registrado")
-
-    teams.append(teamCode)
-
     try:
-        await db["competition"].update_one(
-            {"id": competitionId},
-            {"$set": {"teams": teams}}
+        result = await db["competition"].update_one(
+            {"id": competitionId, "teams": {"$ne": teamCode}},
+            {"$addToSet": {"teams": teamCode}}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al actualizar equipos: {str(e)}")
 
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="El equipo ya está registrado en esta competencia")
+
+    competition_updated = await db["competition"].find_one({"id": competitionId})
     return {
         "message": "Equipo registrado exitosamente",
-        "username": competitionId,
+        "competitionId": competitionId,
         "teamCode": teamCode,
-        "totalTeams": len(teams)
+        "totalTeams": len(competition_updated.get("teams", []))
     }
 
 @router.get("/{competitionId}")
@@ -221,34 +221,60 @@ async def get_competition_private(
 async def create_submission(
     competitionId: str,
     problemId: str,
+    validation_code: str = Body(...),
     user: dict = Depends(get_current_user)
 ):
+    # Verificar código de validación en el servidor (FIX 4)
+    expected = os.getenv("VALIDATION_CODE", "")
+    if not expected:
+        raise HTTPException(status_code=500, detail="VALIDATION_CODE no configurado en el servidor")
+    if validation_code != expected:
+        raise HTTPException(status_code=403, detail="Código de validación incorrecto")
+
     try:
-        # 👤 Validar usuario autenticado
+        # Validar usuario autenticado
         username = user.get("username")
         if not username:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario no autenticado")
 
-        # 🔍 Buscar competencia
+        # Buscar competencia
         competition = await db["competition"].find_one({"id": competitionId})
         if not competition:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Competencia no encontrada")
 
-        # 🔍 Validar problema dentro de la competencia
+        # Validar problema dentro de la competencia
         problem_data = next((p for p in competition.get('problems', []) if str(p.get('id', '')) == problemId), None)
         if not problem_data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problema no encontrado en la competencia")
 
-        # 🧮 Calcular puntos
+        # Calcular puntos
         difficulty = problem_data.get("difficulty")
         points = competition.get("scoring", {}).get(difficulty, 0)
 
-        # ⏱️ Validar y calcular tiempo desde inicio
+        # Validar y calcular tiempo desde inicio
         start_time = validate_competition_date(competition.get("date"))
         now = datetime.utcnow().replace(tzinfo=timezone.utc)
         elapsed_seconds = int((now - start_time).total_seconds())
 
-        # 🔎 Buscar usuario y equipo
+        # Verificar que la competencia esté activa
+        comp_status = competition.get("status")
+        if comp_status != "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"La competencia no está activa (estado actual: {comp_status})"
+            )
+
+        # Verificar que no haya terminado el tiempo
+        duration_minutes = competition.get("duration", 0)
+        from datetime import timedelta
+        end_time = start_time + timedelta(minutes=duration_minutes)
+        if now > end_time:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El tiempo de la competencia ha terminado"
+            )
+
+        # Buscar usuario y equipo
         user_data = await db["users"].find_one({"username": username})
         if not user_data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
@@ -260,26 +286,55 @@ async def create_submission(
         team = await db["teams"].find_one({"code": team_code})
         if not team:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipo no encontrado")
+
+        # Verificar que el equipo esté inscrito en esta competencia
+        competition_teams = competition.get("teams", [])
+        if team_code not in competition_teams:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tu equipo no está inscrito en esta competencia"
+            )
+
+        # FIX 3 — Verificar doble submission
+        existing_submissions = team.get("submissions", [])
+        already_solved = any(str(s.get("problem", "")) == problemId for s in existing_submissions)
+        if already_solved:
+            raise HTTPException(status_code=400, detail="Este problema ya fue validado por tu equipo")
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{e}")
 
-    # ➕ Actualizar puntos del equipo
+    # FIX 2 — Actualizar puntos con $inc atómico (evita race condition)
     try:
         await db["teams"].update_one(
             {"code": team_code},
             {
-                "$set": {"points": team.get("points", 0) + points},
+                "$inc": {"points": points},
                 "$push": {"submissions": Submission.model_validate(
-                    {'problem':problemId,
-                    'status':"AC",
-                    'time':elapsed_seconds,
-                    'member':username,
-                    'points':points}, strict=False
+                    {'problem': problemId,
+                     'status': "AC",
+                     'time': elapsed_seconds,
+                     'member': username,
+                     'points': points}, strict=False
                 ).dict()}
             }
         )
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error al actualizar equipo: {str(e)}")
+
+    # WebSocket broadcast para ranking en tiempo real
+    await manager.broadcast(competitionId, {
+        "event": "new_submission",
+        "data": {
+            "problem": problemId,
+            "member": username,
+            "points": points,
+            "teamCode": team_code,
+            "time": elapsed_seconds
+        }
+    })
 
     return {
         "submission": {
