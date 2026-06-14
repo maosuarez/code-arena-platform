@@ -22,6 +22,7 @@ class MQTTManager:
                 port=MQTT_WS_PORT,
                 transport="websockets",
                 websocket_path=MQTT_WS_PATH,
+                websocket_headers={"Host": MQTT_HOST},
                 tls_context=_tls_context,
                 username=MQTT_USERNAME,
                 password=MQTT_PASSWORD,
