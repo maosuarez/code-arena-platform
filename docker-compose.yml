@@ -1,0 +1,62 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - arena-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: dockerfile
+    # Puerto NO expuesto al host — solo accesible dentro de arena-network (modo proxy).
+    # Para modo directo, descomenta la línea siguiente:
+    # ports:
+    #   - "8000:8000"
+    expose:
+      - "8000"
+    environment:
+      MONGO_URL: ${MONGO_URL}
+      MONGO_DB: ${MONGO_DB}
+      SECRET_KEY: ${SECRET_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      MQTT_HOST: ${MQTT_HOST}
+      MQTT_WS_PORT: ${MQTT_WS_PORT:-443}
+      MQTT_WS_PATH: ${MQTT_WS_PATH:-/mqtt}
+      MQTT_USERNAME: ${MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-code-arena}
+    depends_on:
+      - mongo
+    networks:
+      - arena-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: dockerfile
+      args:
+        # Modo proxy (default): rutas relativas — el rewrite de Next enruta a backend interno.
+        # Modo directo: cambia a la URL pública del backend, ej: https://backend.azurewebsites.net
+        NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-/backend}
+        NEXT_PUBLIC_MQTT_WS_URL: ${NEXT_PUBLIC_MQTT_WS_URL}
+    ports:
+      - "3000:3000"
+    environment:
+      # URL interna de Docker — usada por next.config.ts para los rewrites.
+      # Vaciar esta variable desactiva el proxy y activa modo directo.
+      BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
+      NEXT_PUBLIC_MQTT_WS_URL: ${NEXT_PUBLIC_MQTT_WS_URL}
+    depends_on:
+      - backend
+    networks:
+      - arena-network
+
+volumes:
+  mongo-data:
+
+networks:
+  arena-network:
+    driver: bridge
