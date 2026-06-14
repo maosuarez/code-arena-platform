@@ -1,0 +1,8 @@
+{
+  "name": "code-arena-test",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "mqtt": "^5.10.4"
+  }
+}
