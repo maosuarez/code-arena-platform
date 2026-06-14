@@ -1,0 +1,45 @@
+name: Build, Push and Deploy Docker Image to ACR
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to ACR with token
+        run: echo ${{ secrets.ACR_TOKEN_PASSWORD }} | docker login ${{ secrets.AZURE_ACR_NAME }}.azurecr.io -u ${{ secrets.ACR_TOKEN_USERNAME }} --password-stdin
+
+      - name: Crear archivo .env
+        run: |
+          echo "NEXT_PUBLIC_BASE_URL=${{ secrets.NEXT_PUBLIC_BASE_URL }}" >> .env
+          echo "NEXT_PUBLIC_VALIDATION_PASSWORD=${{ secrets.NEXT_PUBLIC_VALIDATION_PASSWORD }}" >> .env
+
+      - name: Build Docker image
+        run: |
+          docker build \
+          --build-arg NEXT_PUBLIC_BASE_URL=${{ secrets.NEXT_PUBLIC_BASE_URL }} \
+          --build-arg NEXT_PUBLIC_VALIDATION_PASSWORD=${{ secrets.NEXT_PUBLIC_VALIDATION_PASSWORD }} \
+          -t ${{ secrets.AZURE_ACR_NAME }}.azurecr.io/code-arena:latest .
+          
+      - name: Push Docker image
+        run: docker push ${{ secrets.AZURE_ACR_NAME }}.azurecr.io/code-arena:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }} # Nombre de tu Web App en Azure
+          slot-name: 'production'
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          images: ${{ secrets.AZURE_ACR_NAME }}.azurecr.io/code-arena:latest
