@@ -36,7 +36,7 @@ y registran su solución manualmente desde la UI.
 
 ## Integraciones externas
 
-- **Azure Cosmos DB for MongoDB**: base de datos principal (API de Mongo, driver Motor async).
+- **MongoDB**: Motor async. En local se levanta como contenedor Docker (`mongo:7`). En producción puede apuntar a cualquier instancia externa via `MONGO_URL`.
 - **LeetCode**: `services/leetcode_api.py` — actualmente vacío; futura validación automática de ACs.
 - **Azure App Service**: backend en producción (`api-code-arena.azurewebsites.net`).
 - **Azure Static Web Apps**: frontend en producción.

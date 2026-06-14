@@ -10,8 +10,8 @@ Code Arena Unisabana es una aplicación web full-stack diseñada para facilitar 
 
 **Backend**: FastAPI, Pydantic v2, Motor (MongoDB asincrónico), JWT con HS256, bcrypt  
 **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS v4, shadcn/ui  
-**Base de Datos**: Azure Cosmos DB (MongoDB API)  
-**Infraestructura**: Azure App Service (backend) + Azure Static Web Apps (frontend)
+**Base de Datos**: MongoDB 7 (autoalojado o externo)  
+**Infraestructura**: Docker Compose (local)
 
 ## Estructura del Proyecto
 
@@ -20,7 +20,7 @@ code-arena-unisabana/
 ├── backend/              # API FastAPI
 │   ├── app/
 │   │   ├── main.py       # Punto de entrada y configuración
-│   │   ├── database.py   # Cliente Motor para Cosmos DB
+│   │   ├── database.py   # Cliente Motor para MongoDB
 │   │   ├── routes/       # Endpoints: auth, usuarios, equipos, competencias
 │   │   ├── models_entity/# Esquemas Pydantic
 │   │   └── services/     # Lógica de negocio
@@ -43,11 +43,20 @@ code-arena-unisabana/
 ## Inicio Rápido
 
 ### Requisitos
-- Python 3.10+ (backend)
-- Node.js 18+ (frontend)
-- Credenciales de Azure Cosmos DB
+- Docker y Docker Compose
 
-### Backend
+### Con Docker Compose (recomendado)
+
+```bash
+cp .env.example .env  # ajusta las variables si necesitas mongo externo
+docker compose up --build
+```
+
+El backend estará en `http://localhost:8000` y el frontend en `http://localhost:3000`.
+
+### Desarrollo local (sin Docker)
+
+#### Backend
 
 ```bash
 cd backend
@@ -58,7 +67,7 @@ uvicorn app.main:app --reload
 
 La API estará disponible en `http://localhost:8000` y la documentación interactiva en `/docs`.
 
-### Frontend
+#### Frontend
 
 ```bash
 cd frontend
@@ -71,9 +80,17 @@ La aplicación estará disponible en `http://localhost:3000`.
 
 ## Variables de Entorno
 
-### Backend (`.env`)
-- `COSMOS_URL`: Cadena de conexión a Azure Cosmos DB
-- `COSMOS_DB`: Nombre de la base de datos
+Copia `.env.example` a `.env` en la raíz del proyecto y ajusta los valores:
+
+### Raíz (`.env`) — usado por Docker Compose
+- `MONGO_URL`: Cadena de conexión a MongoDB (ej: `mongodb://mongo:27017` para el contenedor local)
+- `MONGO_DB`: Nombre de la base de datos
+- `SECRET_KEY`: Clave para firmar JWTs
+- `NEXT_PUBLIC_BASE_URL`: URL de la API backend (ej: `http://localhost:8000`)
+
+### Backend (`backend/.env`) — usado en desarrollo local sin Docker
+- `MONGO_URL`: Cadena de conexión a MongoDB
+- `MONGO_DB`: Nombre de la base de datos
 - `SECRET_KEY`: Clave para firmar JWTs
 
 ### Frontend (`.env.local`)

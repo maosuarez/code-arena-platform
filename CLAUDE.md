@@ -16,7 +16,7 @@ cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload        # dev server at :8000
 ```
-Requires `.env` with `COSMOS_URL` and `COSMOS_DB` (Azure Cosmos DB for MongoDB).
+Requires `.env` with `MONGO_URL` and `MONGO_DB` (MongoDB — local Docker container or external).
 
 ### Frontend
 ```bash
@@ -32,7 +32,7 @@ Requires `NEXT_PUBLIC_BASE_URL` env var pointing to the backend URL.
 
 **Backend** (`backend/app/`):
 - `main.py` — FastAPI app, CORS config, router registration
-- `database.py` — Motor async MongoDB client via `COSMOS_URL`/`COSMOS_DB`
+- `database.py` — Motor async MongoDB client via `MONGO_URL`/`MONGO_DB`
 - `routes/` — One file per domain: `auth`, `users`, `teams`, `competition`, `ranking`
 - `models_entity/` — Pydantic v2 models: `users`, `teams`, `competition`, `general`
 - `services/` — `leetcode_api.py` (external), `users.py` (helpers), `scoring.py`
