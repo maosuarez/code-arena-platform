@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, use } from "react"
+import { useState, useEffect, use, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -24,10 +24,11 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { apiRequest } from "@/lib/api"
+import { useCompetitionSocket } from "@/hooks/useCompetitionSocket"
 
 
 type Rank = {
-  id: number;
+  id: string;
   name: string;
   avatar: string; // Emoji o URL
   color: string; // Puede usarse para temas visuales
@@ -163,29 +164,32 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
   const [soundEnabled, setSoundEnabled] = useState(true)
   const [presentationMode, setPresentationMode] = useState(false)
   const [highlightLastSolve, setHighlightLastSolve] = useState(true)
-  const [lastSolveAnimation, setLastSolveAnimation] = useState<number | null>(null)
+  const [lastSolveAnimation, setLastSolveAnimation] = useState<string | null>(null)
   const [reload, setReload] = useState(Boolean)
 
-  useEffect(()=>{
-    async function fetchCompetitionRanking(competitionId: string) {
-      try {
-        const response = await apiRequest(`/ranking/${competitionId}`, {
-          method: "GET",
-          token: true
-        });
+  const fetchCompetitionRanking = useCallback(async (competitionId: string) => {
+    try {
+      const response = await apiRequest(`/ranking/${competitionId}`, {
+        method: "GET",
+        token: true
+      });
 
-        console.log(RanksData)
-        console.log(response.ranking)
-        setRankData(response.ranking); // Devuelve la lista de equipos
-        setResComp(response.competition)
-      } catch (err) {
-        console.error("❌ Error al cargar el ranking:", err);
-        return [];
-      }
+      setRankData(response.ranking);
+      setResComp(response.competition)
+    } catch (err) {
+      console.error("❌ Error al cargar el ranking:", err);
     }
+  }, [])
 
+  useEffect(() => {
     fetchCompetitionRanking(idCom)
-  }, [reload])
+  }, [reload, idCom])
+
+  useCompetitionSocket(idCom, (msg) => {
+    if (msg.event === "new_submission") {
+      fetchCompetitionRanking(idCom)
+    }
+  })
 
   // Simulate real-time updates
   useEffect(() => {
