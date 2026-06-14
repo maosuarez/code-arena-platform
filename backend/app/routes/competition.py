@@ -2,19 +2,21 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Body, status
-from app.models_entity.competition import Competition, RequestCompetition
+from pydantic import BaseModel
+from app.models_entity.competition import Competition, RequestCompetition, Problem, CompetitionUpdate
 from app.database import db
 import uuid
 
 from app.models_entity.teams import Submission
-from app.routes.auth import get_current_user
+from app.routes.auth import get_current_user, require_admin
 from app.services.users import validate_competition_date
 from app.services.websocket_manager import manager
+from app.services.judge0 import judge_submission
 
 router = APIRouter()
 
 @router.post("/create")
-async def create_competition(req: RequestCompetition, _user: dict = Depends(get_current_user)):
+async def create_competition(req: RequestCompetition, _user: dict = Depends(require_admin)):
     # Validación de campos obligatorios
     required_fields = ["title", "date", "status"]
     missing = [field for field in required_fields if not getattr(req, field, None)]
@@ -22,7 +24,11 @@ async def create_competition(req: RequestCompetition, _user: dict = Depends(get_
         raise HTTPException(status_code=400, detail=f"Faltan campos: {', '.join(missing)}")
 
     dict_req = req.dict()
-    dict_req['id'] = str(uuid.uuid4())  # Asegúrate de convertirlo a string si el modelo espera str
+    dict_req['id'] = str(uuid.uuid4())
+
+    # Strip testCases from problems before building Competition (test cases stored separately)
+    for p in dict_req.get("problems", []):
+        p.pop("testCases", None)
 
     # Validar y transformar el modelo
     try:
@@ -48,9 +54,23 @@ async def create_competition(req: RequestCompetition, _user: dict = Depends(get_
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al guardar: {str(e)}")
 
+    # Extraer y guardar casos de prueba en colección separada (nunca expuestos al cliente)
+    for orig_problem in req.problems:
+        if orig_problem.testCases:
+            prob_id = next(
+                (p["id"] for p in comp_doc.get("problems", []) if p.get("title") == orig_problem.title),
+                None,
+            )
+            if prob_id:
+                await db["testcases"].replace_one(
+                    {"problemId": prob_id},
+                    {"problemId": prob_id, "cases": [tc.dict() for tc in orig_problem.testCases]},
+                    upsert=True,
+                )
+
     return {
         "message": "Competición creada exitosamente",
-        "id": comp.title,
+        "id": comp_doc["id"],
         "title": comp.title,
         "status": comp.status
     }
@@ -113,6 +133,17 @@ async def join_team_to_competition(
         "teamCode": teamCode,
         "totalTeams": len(competition_updated.get("teams", []))
     }
+
+@router.get("/problem-stats")
+async def get_problem_stats():
+    pipeline = [
+        {"$unwind": "$problems"},
+        {"$group": {"_id": "$problems.difficulty", "count": {"$sum": 1}}}
+    ]
+    results = await db["competition"].aggregate(pipeline).to_list(None)
+    stats = {r["_id"]: r["count"] for r in results}
+    return {"easy": stats.get("easy", 0), "medium": stats.get("medium", 0), "hard": stats.get("hard", 0)}
+
 
 @router.get("/{competitionId}")
 async def get_competition_by_id(competitionId: str):
@@ -217,19 +248,35 @@ async def get_competition_private(
     }
 
 
+class SubmissionRequest(BaseModel):
+    source_code: str
+    language_id: int
+
+class SubmissionRequestFallback(BaseModel):
+    source_code: Optional[str] = None
+    language_id: Optional[int] = None
+    validation_code: Optional[str] = None
+
 @router.post("/submission/{competitionId}/{problemId}")
 async def create_submission(
     competitionId: str,
     problemId: str,
-    validation_code: str = Body(...),
+    req: SubmissionRequestFallback = Body(...),
     user: dict = Depends(get_current_user)
 ):
-    # Verificar código de validación en el servidor (FIX 4)
-    expected = os.getenv("VALIDATION_CODE", "")
-    if not expected:
-        raise HTTPException(status_code=500, detail="VALIDATION_CODE no configurado en el servidor")
-    if validation_code != expected:
-        raise HTTPException(status_code=403, detail="Código de validación incorrecto")
+    judge_key = os.getenv("JUDGE0_API_KEY", "")
+    fallback_code = os.getenv("VALIDATION_CODE", "")
+
+    if judge_key:
+        # Judge0 mode: validate via actual code execution
+        if not req.source_code or not req.language_id:
+            raise HTTPException(status_code=400, detail="Se requieren source_code y language_id")
+    elif fallback_code:
+        # Fallback mode: simple validation code
+        if req.validation_code != fallback_code:
+            raise HTTPException(status_code=403, detail="Código de validación incorrecto")
+    else:
+        raise HTTPException(status_code=500, detail="El servidor no tiene JUDGE0_API_KEY ni VALIDATION_CODE configurados")
 
     try:
         # Validar usuario autenticado
@@ -252,8 +299,19 @@ async def create_submission(
         points = competition.get("scoring", {}).get(difficulty, 0)
 
         # Validar y calcular tiempo desde inicio
-        start_time = validate_competition_date(competition.get("date"))
         now = datetime.utcnow().replace(tzinfo=timezone.utc)
+        from datetime import timedelta
+
+        # Prefer explicit start_time/end_time; fall back to date + duration
+        raw_start = competition.get("start_time") or competition.get("date")
+        raw_end = competition.get("end_time")
+        start_time = validate_competition_date(raw_start)
+        if raw_end:
+            end_time = validate_competition_date(raw_end)
+        else:
+            duration_minutes = competition.get("duration", 0)
+            end_time = start_time + timedelta(minutes=duration_minutes)
+
         elapsed_seconds = int((now - start_time).total_seconds())
 
         # Verificar que la competencia esté activa
@@ -264,10 +322,14 @@ async def create_submission(
                 detail=f"La competencia no está activa (estado actual: {comp_status})"
             )
 
+        # Verificar que la competencia haya comenzado
+        if now < start_time:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La competencia aún no ha comenzado"
+            )
+
         # Verificar que no haya terminado el tiempo
-        duration_minutes = competition.get("duration", 0)
-        from datetime import timedelta
-        end_time = start_time + timedelta(minutes=duration_minutes)
         if now > end_time:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -295,7 +357,7 @@ async def create_submission(
                 detail="Tu equipo no está inscrito en esta competencia"
             )
 
-        # FIX 3 — Verificar doble submission
+        # Verificar doble submission
         existing_submissions = team.get("submissions", [])
         already_solved = any(str(s.get("problem", "")) == problemId for s in existing_submissions)
         if already_solved:
@@ -306,7 +368,21 @@ async def create_submission(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{e}")
 
-    # FIX 2 — Actualizar puntos con $inc atómico (evita race condition)
+    # Judge0 validation (only if API key is configured and source_code was provided)
+    if judge_key and req.source_code:
+        tc_doc = await db["testcases"].find_one({"problemId": problemId})
+        test_cases = tc_doc.get("cases", []) if tc_doc else []
+        passed, error_msg = await judge_submission(
+            source_code=req.source_code,
+            language_id=req.language_id,
+            test_cases=test_cases,
+            time_limit=problem_data.get("time_limit", 2.0),
+            memory_limit=problem_data.get("memory_limit", 256),
+        )
+        if not passed:
+            raise HTTPException(status_code=400, detail=error_msg or "Solución incorrecta")
+
+    # Actualizar puntos con $inc atómico (evita race condition)
     try:
         await db["teams"].update_one(
             {"code": team_code},
@@ -345,4 +421,75 @@ async def create_submission(
             "points": points
         }
     }
+
+
+class TestCaseUpsert(BaseModel):
+    cases: list[dict]
+
+@router.put("/problems/{problemId}/testcases")
+async def upsert_testcases(
+    problemId: str,
+    body: TestCaseUpsert,
+    _user: dict = Depends(require_admin),
+):
+    """Admin endpoint to set test cases for a problem."""
+    await db["testcases"].replace_one(
+        {"problemId": problemId},
+        {"problemId": problemId, "cases": body.cases},
+        upsert=True,
+    )
+    return {"message": f"{len(body.cases)} casos de prueba guardados", "problemId": problemId}
+
+
+@router.get("/problems/{problemId}/testcases")
+async def get_testcases(problemId: str, _user: dict = Depends(require_admin)):
+    doc = await db["testcases"].find_one({"problemId": problemId}, {"_id": 0})
+    if not doc:
+        return {"problemId": problemId, "cases": []}
+    return doc
+
+
+@router.patch("/{competitionId}")
+async def update_competition(
+    competitionId: str,
+    update: CompetitionUpdate,
+    _user: dict = Depends(require_admin),
+):
+    """Admin endpoint to partially update a competition."""
+    existing = await db["competition"].find_one({"id": competitionId})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Competición no encontrada")
+
+    # Build update dict — only include fields that were explicitly set
+    update_data = update.model_dump(mode="json", exclude_none=True)
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No se proporcionaron campos para actualizar")
+
+    # Handle problems update: strip testCases, upsert them separately
+    if "problems" in update_data:
+        raw_problems = update_data["problems"]
+        clean_problems = []
+        for p in raw_problems:
+            test_cases = p.pop("testCases", [])
+            prob_id = p.get("id") or str(uuid.uuid4())
+            p["id"] = prob_id
+            clean_problems.append(p)
+            if test_cases:
+                await db["testcases"].replace_one(
+                    {"problemId": prob_id},
+                    {"problemId": prob_id, "cases": test_cases},
+                    upsert=True,
+                )
+        update_data["problems"] = clean_problems
+
+    try:
+        await db["competition"].update_one(
+            {"id": competitionId},
+            {"$set": update_data},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al actualizar: {str(e)}")
+
+    return {"message": "Competición actualizada", "id": competitionId}
 

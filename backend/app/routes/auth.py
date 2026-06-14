@@ -94,16 +94,26 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     user["_id"] = str(user["_id"])
     return user
 
+# ─── Admin guard dependency ────────────────────────────────────────────────────
+
+async def require_admin(current_user: dict = Depends(get_current_user)):
+    if not current_user.get("is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso restringido a administradores",
+        )
+    return current_user
+
 # ---------------------- verify_token ------------------------------------
 
 @router.get("/verify")
 async def verify_token(current_user: dict = Depends(get_current_user)):
-    # Retornar datos públicos del usuario
     current_user.pop("password", None)
     return {
         "id": current_user.get("_id"),
         "username": current_user.get("username"),
         "email": current_user.get("email"),
-        "teamCode": current_user.get("teamCode", None)
+        "teamCode": current_user.get("teamCode", None),
+        "is_admin": current_user.get("is_admin", False),
     }
 

@@ -1,9 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
-from typing import Optional
 
 
-# Usuario
 class User(BaseModel):
     id: Optional[str] = Field(default=None, alias="_id")
     username: str
@@ -11,6 +9,8 @@ class User(BaseModel):
     teamCode: Optional[str] = None
     leetcode_username: Optional[str] = None
     password: str
+    is_admin: bool = False
+
 
 class RegisterRequest(BaseModel):
     username: str
