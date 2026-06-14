@@ -113,20 +113,25 @@ async def get_competition_ranking(competitionId: str):
                 "points": team.get("points", 0),
                 "solves": solves,
                 "totalTime": total_time_str,
+                "_totalTimeSeconds": total_time,
                 "lastSolve": last_solve_title,
                 "lastSolveTime": last_solve_time,
                 "isLastSolver": False,  # se marca luego
-                "achievements": generate_achievements() 
+                "achievements": generate_achievements()
             })
 
-        # 🏁 Determinar quién fue el último en resolver
+        # 🏁 Determinar quién fue el último en resolver usando segundos
         if rankings:
-            last_solver = max(rankings, key=lambda r: r["totalTime"])
+            last_solver = max(rankings, key=lambda r: r["_totalTimeSeconds"])
             for r in rankings:
                 r["isLastSolver"] = (r["id"] == last_solver["id"])
 
-        # 📊 Ordenar por puntos descendente, luego por tiempo ascendente
-        rankings.sort(key=lambda r: (-r["points"], r["totalTime"]))
+        # 📊 Ordenar por puntos descendente, luego por tiempo ascendente (en segundos)
+        rankings.sort(key=lambda r: (-r["points"], r["_totalTimeSeconds"]))
+
+        # Eliminar campo temporal antes de retornar
+        for r in rankings:
+            r.pop("_totalTimeSeconds", None)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error de base de datos: {str(e)}")
 

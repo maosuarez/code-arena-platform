@@ -10,8 +10,8 @@ router = APIRouter()
 @router.post("/register", response_model=Token)
 async def register_user(user: RegisterRequest):
     try:
-        if await db["users"].find_one({"username": user.email}):
-            raise HTTPException(status_code=400, detail="Email ya registrado")
+        if await db["users"].find_one({"$or": [{"email": user.email}, {"username": user.username}]}):
+            raise HTTPException(status_code=400, detail="Email o nombre de usuario ya registrado")
 
         new_user = User.model_validate({
             "email": user.email,

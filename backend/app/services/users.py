@@ -23,6 +23,6 @@ def validate_competition_date(date_str: str) -> datetime:
         return datetime.fromisoformat(normalized)
     except Exception:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Fecha de competencia inválida. Debe estar en formato ISO 8601."
         )
