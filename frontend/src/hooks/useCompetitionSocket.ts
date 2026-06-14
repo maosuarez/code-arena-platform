@@ -18,8 +18,10 @@ export function useCompetitionSocket(
     if (!competitionId) return
 
     const wsUrl =
-      process.env.NEXT_PUBLIC_MQTT_WS_URL || "ws://localhost:8083/mqtt"
-    const topic = `code-arena/ranking/${competitionId}`
+      process.env.NEXT_PUBLIC_MQTT_WS_URL || "wss://localhost:8083/mqtt"
+    const topicPrefix =
+      process.env.NEXT_PUBLIC_MQTT_TOPIC_PREFIX || "code-arena"
+    const topic = `${topicPrefix}/ranking/${competitionId}`
 
     const client = mqtt.connect(wsUrl, {
       reconnectPeriod: 3000,

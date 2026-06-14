@@ -42,8 +42,9 @@ services:
         # Modo directo: cambia a la URL pública del backend, ej: https://backend.azurewebsites.net
         NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-/backend}
         NEXT_PUBLIC_MQTT_WS_URL: ${NEXT_PUBLIC_MQTT_WS_URL}
+        NEXT_PUBLIC_MQTT_TOPIC_PREFIX: ${NEXT_PUBLIC_MQTT_TOPIC_PREFIX:-code-arena}
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
       # URL interna de Docker — usada por next.config.ts para los rewrites.
       # Vaciar esta variable desactiva el proxy y activa modo directo.
