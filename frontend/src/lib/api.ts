@@ -32,8 +32,6 @@ export async function apiRequest<T = any>(
 
   const url = `${BASE_URL}${endpoint}${query}`
 
-  console.log("URL final:", url)
-
   // Construir headers
   const finalHeaders: HeadersInit = {
     ...headers,

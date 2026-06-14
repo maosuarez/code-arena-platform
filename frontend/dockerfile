@@ -1,13 +1,14 @@
 # Etapa 1: Build
 FROM node:18-alpine AS builder
 
-# 🔐 Declarar los argumentos que vienen del workflow
+# Variables baked en el bundle del cliente en build-time
 ARG NEXT_PUBLIC_BASE_URL
 ARG NEXT_PUBLIC_VALIDATION_PASSWORD
+ARG NEXT_PUBLIC_MQTT_WS_URL
 
-# 🧬 Exportarlos como variables de entorno si los necesitas en tiempo de ejecución
 ENV NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
 ENV NEXT_PUBLIC_VALIDATION_PASSWORD=${NEXT_PUBLIC_VALIDATION_PASSWORD}
+ENV NEXT_PUBLIC_MQTT_WS_URL=${NEXT_PUBLIC_MQTT_WS_URL}
 
 WORKDIR /app
 

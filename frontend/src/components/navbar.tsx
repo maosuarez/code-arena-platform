@@ -16,7 +16,7 @@ interface NavbarProps {
 
 export function Navbar({ onLoginClick }: NavbarProps) {
   const { setTheme } = useTheme()
-  const { isAuthenticated, setIsAuthenticated } = useAuth()
+  const { isAuthenticated, setIsAuthenticated, isLoading } = useAuth()
   const { setToken } = useToken()
   const { setTeamCode } = useTeamCode()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -92,7 +92,7 @@ export function Navbar({ onLoginClick }: NavbarProps) {
             </DropdownMenu>
 
             {/* Auth Buttons */}
-            {
+            {!isLoading && (
               !isAuthenticated ? (
                 <div>
                   <Button
@@ -121,7 +121,7 @@ export function Navbar({ onLoginClick }: NavbarProps) {
                   Cerrar sesión
                 </Button>
               )
-            }
+            )}
 
           </div>
 
@@ -156,7 +156,7 @@ export function Navbar({ onLoginClick }: NavbarProps) {
             {/* Auth Buttons */}
 
             {/* Auth Buttons (Mobile) */}
-            {
+            {!isLoading && (
               !isAuthenticated ? (
                 <div>
                   <Button
@@ -182,7 +182,7 @@ export function Navbar({ onLoginClick }: NavbarProps) {
                   Cerrar sesión
                 </Button>
               )
-            }
+            )}
 
             <div className="flex items-center justify-between pt-3 border-t border-border/40">
               <span className="text-sm text-muted-foreground font-medium">Tema</span>
