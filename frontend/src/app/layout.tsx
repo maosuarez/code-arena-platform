@@ -6,6 +6,7 @@ import { Analytics } from "@vercel/analytics/next"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { NavbarWrapper } from "@/components/navbar-wrapper"
+import { ApiHealthBanner } from "@/components/api-health-banner"
 import { Suspense } from "react"
 import "./globals.css"
 
@@ -26,13 +27,14 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <Suspense fallback={null}>
             <div className="min-h-screen bg-background">
+              <ApiHealthBanner />
               <NavbarWrapper />
               <main className="flex-1">{children}</main>
             </div>
             <Toaster />
           </Suspense>
         </ThemeProvider>
-        <Analytics />
+        {process.env.VERCEL === "1" && <Analytics />}
       </body>
     </html>
   )

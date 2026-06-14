@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Users, UserPlus, Trophy, Code, Search, Settings,
-  ExternalLink, Clipboard, Eye, UserMinus, Play, Star, Sparkles, Target, Bolt } from "lucide-react"
+import { Users, UserPlus, Trophy, Settings,
+  Clipboard, Eye, UserMinus, Play, Star, Sparkles, Target, Bolt } from "lucide-react"
 import { LoginModal } from "@/components/auth/login-modal"
 import { CreateTeamModal } from "@/components/team/create-team-modal"
 import { JoinTeamModal } from "@/components/team/join-team-modal"
@@ -14,6 +14,7 @@ import { CompetitionDetailsModal } from "@/components/competition/competition-de
 import { toast } from "sonner"
 import { Competition } from "@/lib/types"
 import { useTeamCode } from "@/hooks/useTeamCode"
+import { useAuth } from "@/hooks/useAuth"
 import { apiRequest } from "@/lib/api"
 import Link from "next/link"
 
@@ -23,12 +24,11 @@ export default function HomePage() {
   const [joinTeamModalOpen, setJoinTeamModalOpen] = useState(false)
   const [competitionDetailsOpen, setCompetitionDetailsOpen] = useState(false)
   const [competitionOpen, setCompetitionOpen] = useState<Competition>()
-  const [leetcodeUsername, setLeetcodeUsername] = useState("")
-  const [isLeetcodeConnected, setIsLeetcodeConnected] = useState(false)
-  const [isConnecting, setIsConnecting] = useState(false)
   const [listCompetition, setListCompetition] = useState(Array<Competition>)
 
-  const {teamCode, setTeamCode} = useTeamCode()
+  const { teamCode, setTeamCode } = useTeamCode()
+  const { currentUser, isAuthenticated, isLoading } = useAuth()
+  const isAdmin = currentUser?.is_admin === true
 
   const icons = [Trophy, Star, Target, Bolt]
 
@@ -85,34 +85,22 @@ export default function HomePage() {
   }
 
 
-  const handleSaveLeetcode = async () => {
-    if (!leetcodeUsername.trim()) return
-
-    setIsConnecting(true)
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-
-    setIsLeetcodeConnected(true)
-    setIsConnecting(false)
-    toast(`Tu cuenta ${leetcodeUsername} ha sido vinculada exitosamente.`)
-  }
-
   useEffect(() => {
-  const fetchCompetitions = async () => {
-    try {
-      const response = await apiRequest("/competition/all", { method: "GET" })
+    const fetchCompetitions = async () => {
+      try {
+        const response = await apiRequest("/competition/all", { method: "GET" })
 
-      if (!response.list || !Array.isArray(response.list)) {
-        throw new Error("Respuesta inválida del servidor")
+        if (!response.list || !Array.isArray(response.list)) {
+          throw new Error("Respuesta inválida del servidor")
+        }
+
+        setListCompetition(response.list)
+      } catch {
+        toast.error("Error al cargar competiciones")
       }
-
-      setListCompetition(response.list)
-    } catch{
-      toast.error("Error al cargar competiciones")
     }
-  }
 
-  fetchCompetitions()
+    fetchCompetitions()
   }, [])
 
 
@@ -137,8 +125,25 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Main Action Cards */}
-      <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+      {/* Main Action Cards — hidden for admin */}
+      {!isAdmin && !isLoading && !isAuthenticated && (
+        <div className="max-w-4xl mx-auto">
+          <Card className="border-0 bg-gradient-to-br from-white to-blue-50/50 dark:from-slate-900 dark:to-blue-950/50">
+            <CardContent className="py-8 text-center space-y-4">
+              <p className="text-lg font-semibold text-muted-foreground">
+                Inicia sesión para crear o unirte a un equipo
+              </p>
+              <Button
+                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg"
+                onClick={() => setLoginModalOpen(true)}
+              >
+                Iniciar sesión
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      {!isAdmin && isAuthenticated && <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
         {teamCode === '' ? (
           // 🟦 Tarjeta para crear equipo
           <Card className="group hover:shadow-xl transition-all duration-500 hover:scale-[1.03] hover:-translate-y-1 border-0 bg-gradient-to-br from-white to-blue-50/50 dark:from-slate-900 dark:to-blue-950/50">
@@ -257,60 +262,8 @@ export default function HomePage() {
             </CardContent>
           </Card>
         )}
-      </div>
+      </div>}
 
-      {/* LeetCode Integration */}
-      <Card className="max-w-2xl mx-auto hover:shadow-lg transition-all duration-300 border-0 bg-gradient-to-r from-white to-orange-50/30 dark:from-slate-900 dark:to-orange-950/30">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-r from-orange-500 to-red-600 flex items-center justify-center">
-              <Code className="h-5 w-5 text-white" />
-            </div>
-            Vincula tu LeetCode
-          </CardTitle>
-          <CardDescription>Conecta tu cuenta de LeetCode para validar automáticamente tus soluciones</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Input
-              placeholder="Tu username de LeetCode"
-              className="flex-1 border-2 focus:border-orange-500 transition-colors"
-              value={leetcodeUsername}
-              onChange={(e) => setLeetcodeUsername(e.target.value)}
-              disabled={isLeetcodeConnected || isConnecting}
-            />
-            <Button
-              className="bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 shadow-lg hover:shadow-xl transition-all duration-300 min-w-[120px]"
-              onClick={handleSaveLeetcode}
-              disabled={isLeetcodeConnected || !leetcodeUsername.trim() || isConnecting}
-            >
-              {isConnecting ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                  Conectando...
-                </>
-              ) : (
-                <>
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  {isLeetcodeConnected ? "Conectado" : "Conectar"}
-                </>
-              )}
-            </Button>
-          </div>
-          <div className="text-center">
-            <Badge
-              variant={isLeetcodeConnected ? "default" : "outline"}
-              className={
-                isLeetcodeConnected
-                  ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg animate-pulse"
-                  : "text-muted-foreground"
-              }
-            >
-              {isLeetcodeConnected ? `✓ LeetCode conectado (${leetcodeUsername})` : "⚠ No conectado"}
-            </Badge>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Available Competitions */}
       <div className="space-y-6">
@@ -390,35 +343,47 @@ export default function HomePage() {
                       <Eye className="mr-2 h-4 w-4" />
                       Ver Detalles
                     </Button>
-                    {
-                      teamCode && competition.teams.includes(teamCode) ? (
-                        <div
-                          className="flex items-center justify-center size-sm bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-medium rounded-xl px-4 py-2 shadow-md"
-                        >
-                          Ya estás inscrito
-                        </div>
-                      ) : (
+                    {isAdmin ? (
+                      <Link href={`/ranking/${competition.id}`} passHref>
                         <Button
+                          variant="ghost"
                           size="sm"
-                          onClick={() => handleJoin(competition)}
-                          className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 rounded-xl px-4 py-2"
+                          className="hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-300"
                         >
-                          <Play className="mr-2 h-4 w-4" />
-                          Unirme Ahora
+                          <Settings className="mr-2 h-4 w-4" />
+                          Ver Ranking
                         </Button>
-                      )
-                    }
-
-                    <Link href={`/competition/${competition.id}`} passHref>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-300"
-                      >
-                        <Settings className="mr-2 h-4 w-4" />
-                        Administrar
-                      </Button>
-                    </Link>
+                      </Link>
+                    ) : (
+                      <>
+                        {teamCode && competition.teams.includes(teamCode) ? (
+                          <div
+                            className="flex items-center justify-center size-sm bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-medium rounded-xl px-4 py-2 shadow-md"
+                          >
+                            Ya estás inscrito
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            onClick={() => handleJoin(competition)}
+                            className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 rounded-xl px-4 py-2"
+                          >
+                            <Play className="mr-2 h-4 w-4" />
+                            Unirme Ahora
+                          </Button>
+                        )}
+                        <Link href={`/competition/${competition.id}`} passHref>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-300"
+                          >
+                            <Settings className="mr-2 h-4 w-4" />
+                            Administrar
+                          </Button>
+                        </Link>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -427,61 +392,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Problem Explorer */}
-      <div className="space-y-6">
-        <div className="text-center">
-          <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-slate-900 to-purple-900 dark:from-slate-100 dark:to-purple-100 bg-clip-text text-transparent">
-            Explorar Problemas
-          </h2>
-          <p className="text-muted-foreground">Practica con problemas de LeetCode organizados por dificultad</p>
-        </div>
-
-        <Card className="max-w-4xl mx-auto hover:shadow-lg transition-all duration-300 border-0 bg-gradient-to-r from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
-          <CardHeader>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                <Input
-                  placeholder="Buscar problemas por nombre, etiqueta o dificultad..."
-                  className="w-full pl-10 border-2 focus:border-purple-500 transition-colors"
-                />
-              </div>
-              <Button
-                variant="outline"
-                className="bg-gradient-to-r from-purple-600 to-blue-600 text-white border-0 hover:from-purple-700 hover:to-blue-700 shadow-lg hover:shadow-xl transition-all duration-300"
-              >
-                <Search className="mr-2 h-4 w-4" />
-                Buscar
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-3 justify-center">
-              <Button
-                variant="outline"
-                className="text-green-600 border-2 border-green-200 hover:bg-green-50 hover:border-green-300 dark:text-green-400 dark:border-green-800 dark:hover:bg-green-950 bg-transparent transition-all duration-300 transform hover:scale-105 shadow-md hover:shadow-lg"
-              >
-                <div className="w-3 h-3 rounded-full bg-green-500 mr-2"></div>
-                Fácil (234)
-              </Button>
-              <Button
-                variant="outline"
-                className="text-yellow-600 border-2 border-yellow-200 hover:bg-yellow-50 hover:border-yellow-300 dark:text-yellow-400 dark:border-yellow-800 dark:hover:bg-yellow-950 bg-transparent transition-all duration-300 transform hover:scale-105 shadow-md hover:shadow-lg"
-              >
-                <div className="w-3 h-3 rounded-full bg-yellow-500 mr-2"></div>
-                Medio (567)
-              </Button>
-              <Button
-                variant="outline"
-                className="text-red-600 border-2 border-red-200 hover:bg-red-50 hover:border-red-300 dark:text-red-400 dark:border-red-800 dark:hover:bg-red-950 bg-transparent transition-all duration-300 transform hover:scale-105 shadow-md hover:shadow-lg"
-              >
-                <div className="w-3 h-3 rounded-full bg-red-500 mr-2"></div>
-                Difícil (189)
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
 
       {/* Modals */}
       <LoginModal open={loginModalOpen} onOpenChange={setLoginModalOpen} />

@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect, use, useCallback } from "react"
+import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/useAuth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -21,6 +23,7 @@ import {
   Target,
   Clock,
   Award,
+  ArrowLeft,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { apiRequest } from "@/lib/api"
@@ -154,8 +157,18 @@ interface ResposeCompetition{
 }
 
 export default function RankingPage({ params }: { params: Promise<{ id: string }> }) {
-  const resolvedParams = use(params); // ✅ Desempaqueta la promesa
-  const idCom = resolvedParams?.id;
+  const resolvedParams = use(params)
+  const idCom = resolvedParams?.id
+
+  const router = useRouter()
+  const { isAuthenticated, isLoading: authLoading } = useAuth()
+
+  useEffect(() => {
+    if (authLoading) return
+    if (!isAuthenticated) {
+      router.replace("/")
+    }
+  }, [isAuthenticated, authLoading, router])
 
   const [RanksData, setRankData] = useState<Rank[]>([])
   const [resComp, setResComp] = useState<ResposeCompetition>()
@@ -239,9 +252,20 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
         <div className="sticky top-16 z-40 border-b border-border bg-background/95 backdrop-blur">
           <div className="container mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold">Ranking en Tiempo Real</h1>
-                <p className="text-muted-foreground">{resComp?.title}</p>
+              <div className="flex items-center gap-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => router.back()}
+                  className="rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Volver
+                </Button>
+                <div>
+                  <h1 className="text-2xl font-bold">Ranking en Tiempo Real</h1>
+                  <p className="text-muted-foreground">{resComp?.title}</p>
+                </div>
               </div>
               <div className="flex items-center gap-4">
                 {/* View Mode Toggle */}

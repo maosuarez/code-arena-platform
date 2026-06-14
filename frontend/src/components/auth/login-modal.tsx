@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -17,17 +17,36 @@ import { useTeamCode } from "@/hooks/useTeamCode"
 interface LoginModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialTab?: "login" | "register"
 }
 
-export function LoginModal({ open, onOpenChange }: LoginModalProps) {
+export function LoginModal({ open, onOpenChange, initialTab = "login" }: LoginModalProps) {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState<"login" | "register">(initialTab)
+  const [loginError, setLoginError] = useState("")
+  const [registerError, setRegisterError] = useState("")
   const {setIsAuthenticated} = useAuth()
   const {setToken} = useToken()
   const {setTeamCode} = useTeamCode()
 
+  useEffect(() => {
+    if (!open) {
+      setActiveTab(initialTab)
+      setLoginError("")
+      setRegisterError("")
+    }
+  }, [open, initialTab])
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value as "login" | "register")
+    setLoginError("")
+    setRegisterError("")
+  }
+
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setLoginError("");
     setIsLoading(true);
 
     const formData = new FormData(e.currentTarget);
@@ -51,18 +70,19 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
         localStorage.setItem('teamCode', response.teamCode)
         setTeamCode(response.teamCode)
       }
+      onOpenChange(false)
       window.location.reload()
     } catch (error) {
-      console.error("Error en login:", error);
+      setLoginError(error instanceof Error ? error.message : "Error al iniciar sesión")
     } finally {
       setIsLoading(false);
-      onOpenChange(false);
     }
   };
 
 
   const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setRegisterError("");
     setIsLoading(true);
 
     const formData = new FormData(e.currentTarget);
@@ -81,12 +101,12 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
       setToken(response.access_token)
       localStorage.setItem('token', response.access_token)
       localStorage.setItem('auth', 'true')
+      onOpenChange(false)
       window.location.reload()
     } catch (error) {
-      console.error("Error en login:", error);
+      setRegisterError(error instanceof Error ? error.message : "Error al registrarse")
     } finally {
       setIsLoading(false);
-      onOpenChange(false);
     }
   };
 
@@ -98,7 +118,7 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
           <DialogDescription>Inicia sesión o crea una cuenta para comenzar a competir</DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="login" className="w-full">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="login">Iniciar Sesión</TabsTrigger>
             <TabsTrigger value="register">Registrarse</TabsTrigger>
@@ -141,6 +161,7 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
                   </Button>
                 </div>
               </div>
+              {loginError && <p className="text-sm text-destructive">{loginError}</p>}
               <Button type="submit" className="w-full bg-accent hover:bg-accent/90" disabled={isLoading}>
                 {isLoading ? "Iniciando sesión..." : "Iniciar Sesión"}
               </Button>
@@ -150,11 +171,12 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
           <TabsContent value="register" className="space-y-4">
             <form onSubmit={handleRegister} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Nombre completo</Label>
+                <Label htmlFor="name">Username (identificador único)</Label>
                 <div className="relative">
                   <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input id="name" name="username" type="text" placeholder="Tu nombre" className="pl-10" required />
+                  <Input id="name" name="username" type="text" placeholder="ej. juan123" className="pl-10" required />
                 </div>
+                <p className="text-xs text-muted-foreground">Este será tu identificador único, no podrá cambiarse.</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="register-email">Correo electrónico</Label>
@@ -190,6 +212,7 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
                   </Button>
                 </div>
               </div>
+              {registerError && <p className="text-sm text-destructive">{registerError}</p>}
               <Button type="submit" className="w-full bg-accent hover:bg-accent/90" disabled={isLoading}>
                 {isLoading ? "Creando cuenta..." : "Crear Cuenta"}
               </Button>

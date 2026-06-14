@@ -1,5 +1,5 @@
 type RequestOptions = {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   params?: Record<string, string | number>;
   body?: unknown;
   headers?: Record<string, string>;
@@ -7,6 +7,7 @@ type RequestOptions = {
 };
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "";
+console.debug(`[API] BASE_URL="${BASE_URL}"`);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function apiRequest<T = any>(
@@ -31,6 +32,8 @@ export async function apiRequest<T = any>(
     : ""
 
   const url = `${BASE_URL}${endpoint}${query}`
+  const start = performance.now()
+  console.debug(`[API] ${method} ${url}`)
 
   // Construir headers
   const finalHeaders: HeadersInit = {
@@ -72,10 +75,23 @@ export async function apiRequest<T = any>(
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.message || "Error en la solicitud")
+    const text = await response.text()
+    let detail = `Error ${response.status}`
+    try {
+      const error = JSON.parse(text)
+      detail = error.detail || error.message || detail
+    } catch {
+      if (text) detail = text
+    }
+    const duration = Math.round(performance.now() - start)
+    console.warn(`[API] ${method} ${url} → ${response.status} (${duration}ms) — ${detail}`)
+    throw new Error(detail)
   }
 
-  return response.json()
+  const duration = Math.round(performance.now() - start)
+  console.debug(`[API] ${method} ${url} → ${response.status} (${duration}ms)`)
+  const text = await response.text()
+  if (!text) return undefined as T
+  return JSON.parse(text)
 }
 
