@@ -15,3 +15,4 @@ Jinja2==3.1.6
 PyYAML==6.0.2
 rich==14.1.0
 python-multipart==0.0.20
+aiomqtt==2.3.0
