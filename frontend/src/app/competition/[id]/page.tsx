@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, use } from "react"
+import { useState, useEffect, use, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -36,6 +36,7 @@ import Link from "next/link"
 import { Competition, Problem } from "@/lib/types"
 import { apiRequest } from "@/lib/api"
 import { Submission } from "@/lib/types"
+import { useCompetitionSocket } from "@/hooks/useCompetitionSocket"
 
 export default function CompetitionPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params); // ✅ Desempaqueta la promesa
@@ -57,6 +58,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
   const [teamRanking, setTeamRanking] = useState(null);
   const [totalTeams, setTotalTeams] = useState(0);
   const [teamName, setTeamName] = useState("");
+  const [myTeamCode, setMyTeamCode] = useState("");
   const [avatar, setAvatar] = useState("");
   const [idsaving, setIdSaving] = useState('')
 
@@ -64,19 +66,27 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
 
   const [showDialog, setShowDialog] = useState(false);
   const [password, setPassword] = useState("");
-  // const [selectedProblemId, setSelectedProblemId] = useState<string | null>(null);
 
+  useCompetitionSocket(idCom, (msg) => {
+    if (msg.event === "new_submission" && msg.data.teamCode === myTeamCode) {
+      const sub = msg.data as unknown as Submission
+      setSubmissions((prev) => {
+        const alreadyExists = prev.some(
+          s => s.problem === sub.problem && s.member === sub.member
+        )
+        return alreadyExists ? prev : [...prev, sub]
+      })
+      setTeamPoints((prev) => prev + (msg.data.points as number))
+      toast.success(`¡${msg.data.member} resolvió un problema! +${msg.data.points} pts`)
+    }
+  })
 
   function getTimeRemaining(startDate: string, durationMinutes: number, now: Date = new Date()) {
     const date = new Date(startDate)
     const endDate = new Date(date.getTime() + durationMinutes * 60 * 1000)
     const diffMs = endDate.getTime() - now.getTime()
 
-    if (diffMs <= 0) return 0
-
-    const diffMinutes = Math.floor(diffMs / (1000 * 60))
-
-    return diffMinutes
+    return Math.max(0, Math.floor(diffMs / 1000))
   }
 
   function getEmojiForUser(username: string) {
@@ -115,6 +125,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
             setTeamRanking(teamInfo.ranking || null);
             setTotalTeams(teamInfo.totalTeams || 0);
             setTeamName(teamInfo.name || "");
+            setMyTeamCode(teamInfo.code || "");
             setAvatar(teamInfo.avatar || "")
           }
         }
@@ -170,25 +181,31 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
   }
 
   const getProgressPercentage = () => {
-    const totalTime = competitionData.duration * 60
-    const elapsed = totalTime - timeLeft
-    return (elapsed / totalTime) * 100
+    const totalSeconds = competitionData.duration * 60
+    const elapsed = totalSeconds - timeLeft
+    return Math.min(100, (elapsed / totalSeconds) * 100)
   }
 
   async function submitProblem(competitionId: string) {
+    if (!password) {
+      toast.error("Ingresa el código de validación")
+      return
+    }
     try {
       const response = await apiRequest(
         `/competition/submission/${competitionId}/${idsaving}`, {
         method: "POST",
-        token: true
+        token: true,
+        body: { validation_code: password }
       });
 
       setSubmissions((prev) => [...prev, response.submission]);
-      window.location.reload()
-
-    } catch (error) {
-      console.error("❌ Error al enviar solución:", error);
-      return null;
+      toast.success("¡AC registrado!")
+      setShowDialog(false);
+      setPassword("");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Error al enviar solución"
+      toast.error(msg)
     }
   }
 
@@ -204,10 +221,10 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
         toast(`${problem.title} marcado como en curso`)
         break
       case "validate-ac":
-        console.log(problem.id)
         submitProblem(idCom)
+        break
       case "request-hint":
-        toast( "Se han descontado 5 puntos por la pista")
+        toast("Se han descontado 5 puntos por la pista")
         break
     }
   }
@@ -249,22 +266,10 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  const getStatusIcon = (status: string) => {
-    if (!status) return <AlertCircle className="h-4 w-4 text-muted-foreground" />
-    const sub = submissions.find(p => p.id == status)
-    if (sub){
-      status = "solved"
-    }else{
-      return <AlertCircle className="h-4 w-4 text-muted-foreground" />
-    }
-    switch (status) {
-      case "solved":
-        return <CheckCircle className="h-4 w-4 text-green-500" />
-      case "in-progress":
-        return <Play className="h-4 w-4 text-yellow-500" />
-      default:
-        return <AlertCircle className="h-4 w-4 text-muted-foreground" />
-    }
+  const getStatusIcon = (problemId: string) => {
+    const isSolved = submissions.some(s => s.problem === problemId)
+    if (isSolved) return <CheckCircle className="h-4 w-4 text-green-500" />
+    return <AlertCircle className="h-4 w-4 text-muted-foreground" />
   }
 
   return (
@@ -436,16 +441,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                                 size="sm"
                                 className="bg-accent hover:bg-accent/90 text-white"
                                 onClick={() => {
-                                  const expectedPassword = process.env.NEXT_PUBLIC_VALIDATION_PASSWORD;
-
-                                  if (password !== expectedPassword) {
-                                    alert("Contraseña incorrecta. No se puede validar el reto.");
-                                    return;
-                                  }
-
                                   handleProblemAction(problem.id || "", "validate-ac");
-                                  setShowDialog(false);
-                                  setPassword("");
                                 }}
                               >
                                 <CheckCircle className="mr-2 h-4 w-4" />

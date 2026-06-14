@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from uuid import uuid4
+import string
+import random
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from app.database import db
 from app.models_entity.teams import TeamCreateRequest, TeamCode, JoinTeamRequest
-from app.services.users import generate_unique_code
 from app.routes.auth import get_current_user
 
 router = APIRouter()
@@ -12,44 +13,42 @@ router = APIRouter()
 @router.post("/create")
 async def create_team(request: TeamCreateRequest, current_user: dict = Depends(get_current_user)):
     try:
-        # Generar código único
-        existing_codes_cursor = db["teams"].find({}, {"code": 1})
-        existing_codes_list = await existing_codes_cursor.to_list(length=None)
-        existing_codes = {team["code"] for team in existing_codes_list}
+        # Generar código único con retry atómico (evita race condition)
+        insert_result = None
+        code = None
+        for _ in range(10):
+            code = ''.join(random.choices(string.ascii_uppercase, k=6))
+            try:
+                team = TeamCode.model_validate({
+                    "code": code,
+                    "teamName": request.teamName,
+                    "avatar": request.avatar,
+                    "color": request.color,
+                    "maxMembers": request.maxMembers,
+                    "currentMembers": 1,
+                }, strict=False)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error creando el TeamCode: {str(e)}")
+            try:
+                insert_result = await db["teams"].insert_one(team.dict())
+                break
+            except DuplicateKeyError:
+                continue
+        else:
+            raise HTTPException(status_code=500, detail="No se pudo generar un código único")
 
-        code = generate_unique_code(existing_codes)
-
-        try:
-            team = TeamCode.model_validate({
-                "code": code,
-                "teamName": request.teamName,
-                "avatar": request.avatar,
-                "color": request.color,
-                "maxMembers": request.maxMembers,
-                "currentMembers": 1,
-            }, strict=False)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error creando el TeamCode: {str(e)}")
-
-
-        insert_result = await db["teams"].insert_one(team.dict())
+        if insert_result is None:
+            raise HTTPException(status_code=500, detail="No se pudo generar un código único")
         previous_code = current_user.get("teamCode")
 
         # Si tenía equipo anterior
         if previous_code:
-            old_team = await db["teams"].find_one({"code": previous_code})
-            if old_team:
-                updated_members = old_team["currentMembers"] - 1
-                if updated_members <= 0:
-                    try:
-                        await db["teams"].delete_one({"code": previous_code})
-                    except:
-                        pass
-                else:
-                    await db["teams"].update_one(
-                        {"code": previous_code},
-                        {"$set": {"currentMembers": updated_members}}
-                    )
+            result = await db["teams"].update_one(
+                {"code": previous_code, "currentMembers": {"$gt": 1}},
+                {"$inc": {"currentMembers": -1}}
+            )
+            if result.modified_count == 0:
+                await db["teams"].delete_one({"code": previous_code})
 
         user = await db["users"].find_one({"username": current_user["username"]})
         if not user:
@@ -73,12 +72,17 @@ async def create_team(request: TeamCreateRequest, current_user: dict = Depends(g
 @router.post("/join")
 async def join_team(request: JoinTeamRequest, current_user: dict = Depends(get_current_user)):
     try:
-        # Buscar equipo
+        # Buscar equipo para validar que existe antes del update atómico
         team = await db["teams"].find_one({"code": request.teamCode})
         if not team:
             raise HTTPException(status_code=404, detail="Equipo no encontrado")
 
-        if team["currentMembers"] >= team["maxMembers"]:
+        # Incremento atómico: solo actualiza si hay cupo disponible
+        updated_team = await db["teams"].find_one_and_update(
+            {"code": request.teamCode, "currentMembers": {"$lt": team["maxMembers"]}},
+            {"$inc": {"currentMembers": 1}},
+        )
+        if updated_team is None:
             raise HTTPException(status_code=400, detail="El equipo ya está completo")
 
         # Actualizar usuario con el nuevo teamCode
@@ -87,13 +91,11 @@ async def join_team(request: JoinTeamRequest, current_user: dict = Depends(get_c
             {"$set": {"teamCode": request.teamCode}}
         )
         if update_user.modified_count == 0:
+            await db["teams"].update_one(
+                {"code": request.teamCode},
+                {"$inc": {"currentMembers": -1}}
+            )
             raise HTTPException(status_code=400, detail="No se pudo actualizar el usuario")
-
-        # Incrementar miembros del equipo
-        await db["teams"].update_one(
-            {"code": request.teamCode},
-            {"$inc": {"currentMembers": 1}}
-        )
 
         return {"message": "Unido al equipo exitosamente", "teamCode": request.teamCode}
 
@@ -113,16 +115,12 @@ async def delete_team(current_user: dict = Depends(get_current_user)):
 
         previous_code = user.get("teamCode")
         if previous_code:
-            old_team = await db["teams"].find_one({"code": previous_code})
-            if old_team:
-                updated_members = old_team["currentMembers"] - 1
-                if updated_members <= 0:
-                    await db["teams"].delete_one({"code": previous_code})
-                else:
-                    await db["teams"].update_one(
-                        {"code": previous_code},
-                        {"$set": {"currentMembers": updated_members}}
-                    )
+            result = await db["teams"].update_one(
+                {"code": previous_code, "currentMembers": {"$gt": 1}},
+                {"$inc": {"currentMembers": -1}}
+            )
+            if result.modified_count == 0:
+                await db["teams"].delete_one({"code": previous_code})
 
         await db["users"].update_one(
             {"username": current_user["username"]},
