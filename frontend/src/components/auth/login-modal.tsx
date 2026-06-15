@@ -26,7 +26,7 @@ export function LoginModal({ open, onOpenChange, initialTab = "login" }: LoginMo
   const [activeTab, setActiveTab] = useState<"login" | "register">(initialTab)
   const [loginError, setLoginError] = useState("")
   const [registerError, setRegisterError] = useState("")
-  const {setIsAuthenticated} = useAuth()
+  const {setIsAuthenticated, setCurrentUser} = useAuth()
   const {setToken} = useToken()
   const {setTeamCode} = useTeamCode()
 
@@ -61,7 +61,6 @@ export function LoginModal({ open, onOpenChange, initialTab = "login" }: LoginMo
         body: payload,
         useForm: true
       })
-      setIsAuthenticated(true)
       setToken(response.access_token)
       localStorage.setItem('token', response.access_token)
       localStorage.setItem('auth', 'true')
@@ -70,8 +69,13 @@ export function LoginModal({ open, onOpenChange, initialTab = "login" }: LoginMo
         localStorage.setItem('teamCode', response.teamCode)
         setTeamCode(response.teamCode)
       }
+      // Fetch full user profile so currentUser is populated without a page reload
+      try {
+        const user = await apiRequest('/auth/verify', { method: 'GET', token: true })
+        setCurrentUser(user)
+      } catch { /* ignore — at worst currentUser stays null until refresh */ }
+      setIsAuthenticated(true)
       onOpenChange(false)
-      window.location.reload()
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Error al iniciar sesión")
     } finally {
@@ -97,12 +101,16 @@ export function LoginModal({ open, onOpenChange, initialTab = "login" }: LoginMo
         method: 'POST',
         body: payload
       })
-      setIsAuthenticated(true)
       setToken(response.access_token)
       localStorage.setItem('token', response.access_token)
       localStorage.setItem('auth', 'true')
+      // Fetch full user profile so currentUser is populated without a page reload
+      try {
+        const user = await apiRequest('/auth/verify', { method: 'GET', token: true })
+        setCurrentUser(user)
+      } catch { /* ignore */ }
+      setIsAuthenticated(true)
       onOpenChange(false)
-      window.location.reload()
     } catch (error) {
       setRegisterError(error instanceof Error ? error.message : "Error al registrarse")
     } finally {
