@@ -10,14 +10,31 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Users, Trophy, Target, Plus, Eye, Lock, Map, Pencil, X } from "lucide-react"
+import { Users, Trophy, Target, Plus, Eye, Lock, Map, Pencil, X, CheckCircle, ChevronDown, ChevronUp, Trash2 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import Link from "next/link"
 import { apiRequest } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import MazeEditor from "@/components/competition/maze-editor"
+import { LANGUAGE_NAMES } from "@/lib/types"
+
+type TestCase = { input: string; expected: string }
+type ProblemDraft = {
+  id: string
+  title: string
+  difficulty: "easy" | "medium" | "hard"
+  statement: string
+  language_ids: number[]
+  time_limit: number
+  memory_limit: number
+  hidden_instructions?: string
+  testCases: TestCase[]
+}
+
+const ALL_LANGUAGE_IDS = [71, 62, 54, 63]
 
 interface AdminUser {
   id: string
@@ -78,6 +95,17 @@ export default function AdminDashboard() {
   const [editHard, setEditHard] = useState(50)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
 
+  // Problem management within edit dialog
+  const [editProblems, setEditProblems] = useState<ProblemDraft[]>([])
+  const [expandedEditProblem, setExpandedEditProblem] = useState<string | null>(null)
+  const [newProbTitle, setNewProbTitle] = useState("")
+  const [newProbStatement, setNewProbStatement] = useState("")
+  const [newProbDifficulty, setNewProbDifficulty] = useState<"easy" | "medium" | "hard">("easy")
+  const [newProbLanguages, setNewProbLanguages] = useState<number[]>([71, 62, 54, 63])
+  const [newProbHidden, setNewProbHidden] = useState("")
+  const [draftTestCases, setDraftTestCases] = useState<TestCase[]>([{ input: "", expected: "" }])
+  const [isVerifyingProblem, setIsVerifyingProblem] = useState<string | null>(null)
+
   useEffect(() => {
     if (isLoading) return
     if (!isAuthenticated || !currentUser?.is_admin) {
@@ -126,6 +154,25 @@ export default function AdminDashboard() {
     setEditEasy(comp.scoring?.easy ?? 10)
     setEditMedium(comp.scoring?.medium ?? 30)
     setEditHard(comp.scoring?.hard ?? 50)
+    // Populate problems for editing
+    setEditProblems(comp.problems.map(p => ({
+      id: p.id,
+      title: p.title ?? "",
+      difficulty: (p.difficulty ?? "easy") as "easy" | "medium" | "hard",
+      statement: p.statement ?? "",
+      language_ids: [71, 62, 54, 63],
+      time_limit: 2.0,
+      memory_limit: 256,
+      hidden_instructions: p.hidden_instructions,
+      testCases: [],
+    })))
+    setExpandedEditProblem(null)
+    setNewProbTitle("")
+    setNewProbStatement("")
+    setNewProbDifficulty("easy")
+    setNewProbLanguages([71, 62, 54, 63])
+    setNewProbHidden("")
+    setDraftTestCases([{ input: "", expected: "" }])
   }
 
   const saveEdit = async () => {
@@ -137,6 +184,17 @@ export default function AdminDashboard() {
         description: editDescription,
         status: editStatus,
         scoring: { easy: editEasy, medium: editMedium, hard: editHard },
+        problems: editProblems.map(p => ({
+          id: p.id,
+          title: p.title,
+          difficulty: p.difficulty,
+          statement: p.statement,
+          language_ids: p.language_ids,
+          time_limit: p.time_limit,
+          memory_limit: p.memory_limit,
+          hidden_instructions: p.hidden_instructions,
+          testCases: p.testCases,
+        })),
       }
       if (editStartTime) payload.start_time = new Date(editStartTime).toISOString()
       if (editEndTime) payload.end_time = new Date(editEndTime).toISOString()
@@ -155,6 +213,82 @@ export default function AdminDashboard() {
       toast.error(err instanceof Error ? err.message : "Error al guardar")
     } finally {
       setIsSavingEdit(false)
+    }
+  }
+
+  // Problem helpers for edit dialog
+  const getDifficultyColor = (d: string) => {
+    if (d === "easy") return "text-green-600 border-green-200 bg-green-50 dark:text-green-400 dark:border-green-800 dark:bg-green-950"
+    if (d === "medium") return "text-yellow-600 border-yellow-200 bg-yellow-50 dark:text-yellow-400 dark:border-yellow-800 dark:bg-yellow-950"
+    return "text-red-600 border-red-200 bg-red-50 dark:text-red-400 dark:border-red-800 dark:bg-red-950"
+  }
+  const difficultyLabel = (d: string) => d === "easy" ? "Fácil" : d === "medium" ? "Medio" : "Difícil"
+
+  const toggleEditLang = (id: number) =>
+    setNewProbLanguages(prev => prev.includes(id) ? prev.filter(l => l !== id) : [...prev, id])
+
+  const addDraftTestCase = () => setDraftTestCases(prev => [...prev, { input: "", expected: "" }])
+  const removeDraftTestCase = (i: number) => setDraftTestCases(prev => prev.filter((_, idx) => idx !== i))
+  const updateDraftTestCase = (i: number, field: "input" | "expected", value: string) =>
+    setDraftTestCases(prev => prev.map((tc, idx) => idx === i ? { ...tc, [field]: value } : tc))
+
+  const addProblemToEdit = () => {
+    if (!newProbTitle.trim() || !newProbStatement.trim()) return
+    if (newProbLanguages.length === 0) { toast.error("Selecciona al menos un lenguaje"); return }
+    const problem: ProblemDraft = {
+      id: crypto.randomUUID(),
+      title: newProbTitle.trim(),
+      statement: newProbStatement.trim(),
+      difficulty: newProbDifficulty,
+      language_ids: newProbLanguages,
+      time_limit: 2.0,
+      memory_limit: 256,
+      hidden_instructions: newProbHidden.trim() || undefined,
+      testCases: draftTestCases.filter(tc => tc.input.trim() || tc.expected.trim()),
+    }
+    setEditProblems(prev => [...prev, problem])
+    setNewProbTitle("")
+    setNewProbStatement("")
+    setNewProbDifficulty("easy")
+    setNewProbLanguages([71, 62, 54, 63])
+    setNewProbHidden("")
+    setDraftTestCases([{ input: "", expected: "" }])
+  }
+
+  const removeProblemFromEdit = (id: string) =>
+    setEditProblems(prev => prev.filter(p => p.id !== id))
+
+  const addTestCaseToEditProblem = (problemId: string) =>
+    setEditProblems(prev => prev.map(p =>
+      p.id === problemId ? { ...p, testCases: [...p.testCases, { input: "", expected: "" }] } : p
+    ))
+
+  const updateEditProblemTestCase = (problemId: string, i: number, field: "input" | "expected", value: string) =>
+    setEditProblems(prev => prev.map(p =>
+      p.id === problemId
+        ? { ...p, testCases: p.testCases.map((tc, idx) => idx === i ? { ...tc, [field]: value } : tc) }
+        : p
+    ))
+
+  const removeEditProblemTestCase = (problemId: string, i: number) =>
+    setEditProblems(prev => prev.map(p =>
+      p.id === problemId ? { ...p, testCases: p.testCases.filter((_, idx) => idx !== i) } : p
+    ))
+
+  const verifyProblemTestCases = async (problem: ProblemDraft) => {
+    if (problem.testCases.length === 0) { toast.error("No hay casos de prueba para verificar"); return }
+    setIsVerifyingProblem(problem.id)
+    try {
+      await apiRequest(`/competition/problems/${problem.id}/testcases`, {
+        method: "PUT",
+        token: true,
+        body: { cases: problem.testCases },
+      })
+      toast.success(`Casos de prueba de "${problem.title}" verificados y guardados`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al verificar")
+    } finally {
+      setIsVerifyingProblem(null)
     }
   }
 
@@ -459,16 +593,193 @@ export default function AdminDashboard() {
                 </div>
               </div>
             </div>
-            {editingComp && (
-              <div>
-                <p className="text-sm text-muted-foreground">
-                  Para editar problemas o el laberinto, usa los botones específicos en la lista de competencias.
-                </p>
-                <Link href={`/admin/create`} className="text-sm text-accent underline">
-                  Crear nueva versión de la competencia
-                </Link>
+            <Separator />
+            {/* Problems section */}
+            <div className="space-y-4">
+              <p className="text-sm font-semibold">Challenges ({editProblems.length})</p>
+
+              {/* Existing problems list */}
+              {editProblems.length > 0 && (
+                <ScrollArea className="max-h-64">
+                  <div className="space-y-2">
+                    {editProblems.map(problem => (
+                      <div key={problem.id} className="border rounded-lg overflow-hidden">
+                        <div
+                          className="flex items-center justify-between p-3 cursor-pointer hover:bg-muted/40"
+                          onClick={() => setExpandedEditProblem(expandedEditProblem === problem.id ? null : problem.id)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                            <div>
+                              <p className="font-medium text-sm">{problem.title}</p>
+                              <Badge className={`text-xs ${getDifficultyColor(problem.difficulty)}`}>
+                                {difficultyLabel(problem.difficulty)}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={isVerifyingProblem === problem.id}
+                              onClick={e => { e.stopPropagation(); verifyProblemTestCases(problem) }}
+                            >
+                              {isVerifyingProblem === problem.id ? "..." : "Verificar"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={e => { e.stopPropagation(); removeProblemFromEdit(problem.id) }}>
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                            {expandedEditProblem === problem.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                          </div>
+                        </div>
+                        {expandedEditProblem === problem.id && (
+                          <div className="px-4 pb-4 border-t space-y-3 pt-3">
+                            <div className="text-xs font-mono bg-muted/40 p-2 rounded max-h-20 overflow-y-auto whitespace-pre-wrap">
+                              {problem.statement}
+                            </div>
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <p className="text-xs font-semibold text-muted-foreground uppercase">Casos de prueba</p>
+                                <Button variant="outline" size="sm" onClick={() => addTestCaseToEditProblem(problem.id)}>
+                                  <Plus className="h-3 w-3 mr-1" />Añadir
+                                </Button>
+                              </div>
+                              <div className="space-y-2">
+                                {problem.testCases.map((tc, i) => (
+                                  <div key={i} className="grid grid-cols-2 gap-2 items-start">
+                                    <Textarea
+                                      value={tc.input}
+                                      onChange={e => updateEditProblemTestCase(problem.id, i, "input", e.target.value)}
+                                      placeholder="stdin"
+                                      className="font-mono text-xs min-h-[50px]"
+                                    />
+                                    <div className="flex gap-1">
+                                      <Textarea
+                                        value={tc.expected}
+                                        onChange={e => updateEditProblemTestCase(problem.id, i, "expected", e.target.value)}
+                                        placeholder="stdout esperado"
+                                        className="font-mono text-xs min-h-[50px] flex-1"
+                                      />
+                                      <Button variant="ghost" size="sm" onClick={() => removeEditProblemTestCase(problem.id, i)}>
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                                {problem.testCases.length === 0 && (
+                                  <p className="text-xs text-muted-foreground italic">Sin casos de prueba.</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+
+              {/* Add new problem form */}
+              <div className="space-y-3 p-3 border rounded-xl bg-muted/20">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Añadir challenge</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Título *</Label>
+                    <Input value={newProbTitle} onChange={e => setNewProbTitle(e.target.value)} placeholder="Nombre del problema" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Dificultad</Label>
+                    <Select value={newProbDifficulty} onValueChange={v => setNewProbDifficulty(v as "easy" | "medium" | "hard")}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="easy">Fácil</SelectItem>
+                        <SelectItem value="medium">Medio</SelectItem>
+                        <SelectItem value="hard">Difícil</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Enunciado *</Label>
+                  <Textarea
+                    value={newProbStatement}
+                    onChange={e => setNewProbStatement(e.target.value)}
+                    placeholder="Enunciado completo del problema..."
+                    className="min-h-[80px] font-mono text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-orange-600 dark:text-orange-400">Instrucciones ocultas (opcional)</Label>
+                  <Textarea
+                    value={newProbHidden}
+                    onChange={e => setNewProbHidden(e.target.value)}
+                    placeholder="Instrucción anti-trampa..."
+                    className="min-h-[50px] font-mono text-xs border-orange-200 dark:border-orange-800"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Lenguajes</Label>
+                  <div className="flex flex-wrap gap-1">
+                    {ALL_LANGUAGE_IDS.map(id => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => toggleEditLang(id)}
+                        className={`px-2 py-0.5 rounded-full text-xs border transition-colors ${
+                          newProbLanguages.includes(id)
+                            ? "bg-accent text-accent-foreground border-accent"
+                            : "border-muted-foreground text-muted-foreground"
+                        }`}
+                      >
+                        {LANGUAGE_NAMES[id]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Casos de prueba</Label>
+                    <Button variant="outline" size="sm" onClick={addDraftTestCase}>
+                      <Plus className="h-3 w-3 mr-1" />Añadir
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {draftTestCases.map((tc, i) => (
+                      <div key={i} className="grid grid-cols-2 gap-2 items-start">
+                        <Textarea
+                          value={tc.input}
+                          onChange={e => updateDraftTestCase(i, "input", e.target.value)}
+                          placeholder="stdin"
+                          className="font-mono text-xs min-h-[50px]"
+                        />
+                        <div className="flex gap-1">
+                          <Textarea
+                            value={tc.expected}
+                            onChange={e => updateDraftTestCase(i, "expected", e.target.value)}
+                            placeholder="stdout esperado"
+                            className="font-mono text-xs min-h-[50px] flex-1"
+                          />
+                          {draftTestCases.length > 1 && (
+                            <Button variant="ghost" size="sm" onClick={() => removeDraftTestCase(i)}>
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <Button
+                  onClick={addProblemToEdit}
+                  disabled={!newProbTitle.trim() || !newProbStatement.trim()}
+                  size="sm"
+                  className="bg-accent hover:bg-accent/90"
+                >
+                  <Plus className="mr-1 h-3 w-3" />
+                  Añadir challenge
+                </Button>
               </div>
-            )}
+            </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setEditingComp(null)}>
                 <X className="h-4 w-4 mr-1" />
