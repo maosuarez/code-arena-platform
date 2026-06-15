@@ -58,6 +58,15 @@ export interface Competition {
   };
   start_time?: string;
   end_time?: string;
+  winner?: string;
+  winnerName?: string;
+  podium?: PodiumEntry[];
+}
+
+export interface PodiumEntry {
+  teamCode: string;
+  teamName: string;
+  finished_at?: string;
 }
 
 export const LANGUAGE_NAMES: Record<number, string> = {
