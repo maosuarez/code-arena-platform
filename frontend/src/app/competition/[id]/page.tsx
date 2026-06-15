@@ -28,6 +28,8 @@ import {
   Map,
   Code,
   X,
+  Copy,
+  Flag,
 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -114,6 +116,8 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
   const [mazeState, setMazeState] = useState<MazeState | null>(null)
   const [isUnlocking, setIsUnlocking] = useState(false)
   const [activeTab, setActiveTab] = useState("problems")
+  const [winner, setWinner] = useState<{ teamCode: string; teamName: string } | null>(null)
+  const [podium, setPodium] = useState<{ teamCode: string; teamName: string }[]>([])
 
   useCompetitionSocket(idCom, (msg) => {
     if (msg.event === "new_submission" && msg.data.teamCode === myTeamCode) {
@@ -133,6 +137,35 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
         toast.success(`Puerta abierta! Avanzaste al siguiente nodo.`)
       } else {
         toast(`Equipo rival abrió una puerta.`)
+      }
+    }
+
+    if (msg.event === "team_finished") {
+      // Un equipo llegó a la meta y tomó un lugar del podio (el juego sigue).
+      const place = Number(msg.data.position)
+      const medal = place === 1 ? "🥇" : place === 2 ? "🥈" : "🥉"
+      if (msg.data.teamCode === myTeamCode) {
+        toast.success(`${medal} ¡Tu equipo llegó a la meta! Puesto ${place} del podio.`)
+      } else {
+        toast(`${medal} ${msg.data.teamName} llegó a la meta (puesto ${place}).`)
+      }
+    }
+
+    if (msg.event === "game_over") {
+      // El podio (top 3) se completó: el juego terminó para todos.
+      const pod = Array.isArray(msg.data.podium)
+        ? (msg.data.podium as { teamCode: string; teamName: string }[])
+        : []
+      setPodium(pod)
+      setWinner({ teamCode: String(msg.data.teamCode), teamName: String(msg.data.teamName) })
+      setCompetitionData(prev => ({ ...prev, status: "completed" }))
+      setTimerStatus("ended")
+      const mine = pod.find(p => p.teamCode === myTeamCode)
+      if (mine) {
+        const place = pod.indexOf(mine) + 1
+        toast.success(`🏆 ¡Podio completo! Tu equipo quedó en el puesto ${place}.`)
+      } else {
+        toast(`🏁 Juego terminado. Ganó ${msg.data.teamName}.`)
       }
     }
   })
@@ -181,6 +214,12 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
         if (isMounted) {
           setCompetitionData(competition)
           setProblems(competition.problems || [])
+          if (competition.status === "completed" && competition.winner) {
+            setWinner({ teamCode: competition.winner, teamName: competition.winnerName || competition.winner })
+          }
+          if (Array.isArray(competition.podium)) {
+            setPodium(competition.podium)
+          }
           const ts = computeTimerState(competition)
           setTimerStatus(ts.status)
           setTimeLeft(ts.secondsLeft)
@@ -351,6 +390,18 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="min-h-screen bg-background">
+      {winner && (
+        <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-black text-center py-2 px-4 font-semibold flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+          <span className="flex items-center gap-2"><Flag className="h-4 w-4" /> Juego terminado — Podio:</span>
+          {podium.length > 0
+            ? podium.map((p, i) => (
+                <span key={p.teamCode} className={p.teamCode === myTeamCode ? "underline" : ""}>
+                  {(i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉")} {p.teamName}
+                </span>
+              ))
+            : <span>🥇 {winner.teamName}</span>}
+        </div>
+      )}
       {/* Status Bar */}
       <div className={`sticky top-16 z-40 border-b border-border backdrop-blur transition-colors duration-500 ${
         isCritical
@@ -774,8 +825,18 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
 
               {/* Left: problem statement */}
               <div className="lg:w-2/5 border-b lg:border-b-0 lg:border-r flex flex-col min-h-0">
-                <div className="px-4 pt-3 pb-2 shrink-0">
+                <div className="px-4 pt-3 pb-2 shrink-0 flex items-center justify-between">
                   <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Enunciado</h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(activeProblem.statement).then(() => toast.success("Copiado"))
+                    }}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-muted/60"
+                  >
+                    <Copy className="h-3 w-3" />
+                    Copiar
+                  </button>
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 pb-4">
                   <ProblemStatementWithHidden problem={activeProblem} />
