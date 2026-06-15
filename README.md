@@ -1,108 +1,100 @@
 # Code Arena Unisabana
 
-Plataforma de competencias de programación en vivo para la **Semana de la Ingeniería de la Universidad de La Sabana**. Los equipos de estudiantes compiten resolviendo problemas de LeetCode, registrando sus soluciones manualmente y compitiendo en un ranking en tiempo real.
+Plataforma de competencias de programación para equipos universitarios de la Universidad de la Sabana. Los estudiantes resuelven problemas de LeetCode, registran sus soluciones y compiten en un ranking en tiempo real con evaluación automática via Judge0 y actualizaciones via WebSocket (MQTT).
 
-## Descripción General
+## ¿Qué es Code Arena?
 
-Code Arena Unisabana es una aplicación web full-stack diseñada para facilitar competencias de programación universitarias. Combina un backend robusto con autenticación segura y una interfaz moderna que permite a los estudiantes colaborar en equipos, resolver problemas y ver su posición en el ranking mientras se actualiza en tiempo real.
+Sistema integral para gestionar competencias de programación. Los equipos se inscriben en competencias, resuelven problemas codificados, y el sistema calcula puntos automáticamente según dificultad. Incluye mecánica de laberinto (maze) con evaluación automática, ranking en tiempo real, y panel de administración.
 
 ## Stack Tecnológico
 
-**Backend**: FastAPI, Pydantic v2, Motor (MongoDB asincrónico), JWT con HS256, bcrypt  
-**Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS v4, shadcn/ui  
-**Base de Datos**: MongoDB 7 (autoalojado o externo)  
-**Infraestructura**: Docker Compose (local)
+**Backend**: FastAPI + Python, MongoDB (Motor async), JWT HS256, Judge0 sandbox, MQTT  
+**Frontend**: Next.js 15 + TypeScript, shadcn/ui, Tailwind CSS v4, MQTT WebSocket  
+**Infraestructura**: Docker Compose (local), Azure App Service (backend), Azure Static Web Apps (frontend)
 
-## Estructura del Proyecto
+## Estructura
 
 ```
 code-arena-unisabana/
-├── backend/              # API FastAPI
-│   ├── app/
-│   │   ├── main.py       # Punto de entrada y configuración
-│   │   ├── database.py   # Cliente Motor para MongoDB
-│   │   ├── routes/       # Endpoints: auth, usuarios, equipos, competencias
-│   │   ├── models_entity/# Esquemas Pydantic
-│   │   └── services/     # Lógica de negocio
-│   ├── requirements.txt
-│   └── dockerfile
-│
-├── frontend/             # Aplicación Next.js
-│   ├── src/
-│   │   ├── app/          # App Router (rutas y layouts)
-│   │   ├── components/   # Componentes React reutilizables
-│   │   ├── hooks/        # Hooks personalizados
-│   │   └── lib/          # Utilidades, tipos, cliente API
-│   ├── package.json
-│   └── dockerfile
-│
-└── docs/                 # Documentación del dominio
-
+├── backend/app/
+│   ├── main.py                    # FastAPI app, CORS, routers, rate limiting
+│   ├── database.py                # Motor MongoDB async
+│   ├── limiter.py                 # Rate limiting (slowapi)
+│   ├── routes/                    # auth, users, teams, competition, ranking, maze
+│   ├── models_entity/             # Pydantic v2 models
+│   └── services/                  # judge0.py (código sandbox), users.py, scoring.py
+├── frontend/src/
+│   ├── app/                       # Next.js pages: /, /competition/[id], /ranking/[id], /admin/*
+│   ├── components/                # Auth, Competition, Team, Navbar, shadcn/ui
+│   ├── hooks/                     # useAuth, useToken, useCompetitionSocket
+│   └── lib/                       # apiRequest (fetch wrapper), types.ts
+├── docs/context.md                # Reglas de negocio
+├── docker-compose.yml             # Mongo + Backend + Frontend
+└── .env.example                   # Variables de entorno
 ```
 
-## Inicio Rápido
+## Características principales
 
-### Requisitos
-- Docker y Docker Compose
+- **Autenticación JWT** (120 min, HS256) con bcrypt password hashing
+- **Gestión de equipos** con código único y límite de miembros configurable
+- **Competencias** con problemas LeetCode, scoring flexible por dificultad
+- **Judge0 integrado** para evaluación automática (Python, Java, C++, JavaScript)
+- **Maze/Laberinto** con evaluación automática de código
+- **Ranking real-time** via MQTT WebSocket sin recargar página
+- **Admin dashboard** para crear competencias y validar participantes
+- **Rate limiting** contra abuso de solicitudes
+- **Seguridad** con HSTS, CSP, CORS, user no-root en Docker
+
+## Reglas de dominio clave
+
+- **Submissions**: Status siempre es `AC` (accepted). Sin validación automática de LeetCode.
+- **Scoring**: Puntos según `competition.scoring[difficulty]`. Suma acumulada en `team.points`.
+- **Ranking**: Ordena por `points DESC`, luego `totalTime ASC`.
+- **Equipos**: Pueden estar en múltiples competencias. Vinculados via `teamCode` en perfil usuario.
+- **Competencia privada**: GET `/competition/private/{id}` retorna datos competencia + equipo en una llamada.
+
+## Inicio rápido
 
 ### Con Docker Compose (recomendado)
 
 ```bash
-cp .env.example .env  # ajusta las variables si necesitas mongo externo
+cp .env.example .env
 docker compose up --build
 ```
 
-El backend estará en `http://localhost:8000` y el frontend en `http://localhost:3000`.
+Backend: `http://localhost:8000`, Frontend: `http://localhost:3000`
 
-### Desarrollo local (sin Docker)
+### Desarrollo manual
 
-#### Backend
+**Backend**: `cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload`
 
-```bash
-cd backend
-pip install -r requirements.txt
-cp .env.example .env  # Configura variables de entorno
-uvicorn app.main:app --reload
+**Frontend**: `cd frontend && npm install && npm run dev`
+
+## Variables de entorno
+
+Ver `.env.example` para referencia completa. Críticas:
+- `MONGO_URL`, `MONGO_DB` — MongoDB
+- `SECRET_KEY` — JWT signing
+- `JUDGE0_API_URL`, `JUDGE0_API_KEY` — Judge0 sandbox
+- `MQTT_HOST`, `MQTT_USERNAME`, `MQTT_PASSWORD` — WebSocket ranking
+- `NEXT_PUBLIC_BASE_URL` — Ruta al backend (default: `/backend` modo proxy)
+
+## Despliegue
+
+**→ [Ver DEPLOY.md](./DEPLOY.md) para instrucciones completas de despliegue local, Docker y Azure.**
+
+Incluye requisitos previos, configuración de servicios externos, variables de entorno, y verificación post-despliegue.
+
+## Esquema de datos
+
 ```
-
-La API estará disponible en `http://localhost:8000` y la documentación interactiva en `/docs`.
-
-#### Frontend
-
-```bash
-cd frontend
-npm install
-cp .env.local.example .env.local  # Configura NEXT_PUBLIC_BASE_URL
-npm run dev
+User: {username, email, password, teamCode, leetcode_username, is_admin}
+TeamCode: {code, points, members[], submissions[{problemId, time, difficulty, points}]}
+Competition: {name, date, duration, problems[], scoring{easy/medium/hard}, teams[], createdBy}
 ```
-
-La aplicación estará disponible en `http://localhost:3000`.
-
-## Variables de Entorno
-
-Copia `.env.example` a `.env` en la raíz del proyecto y ajusta los valores:
-
-### Raíz (`.env`) — usado por Docker Compose
-- `MONGO_URL`: Cadena de conexión a MongoDB (ej: `mongodb://mongo:27017` para el contenedor local)
-- `MONGO_DB`: Nombre de la base de datos
-- `SECRET_KEY`: Clave para firmar JWTs
-- `NEXT_PUBLIC_BASE_URL`: URL de la API backend (ej: `http://localhost:8000`)
-
-### Backend (`backend/.env`) — usado en desarrollo local sin Docker
-- `MONGO_URL`: Cadena de conexión a MongoDB
-- `MONGO_DB`: Nombre de la base de datos
-- `SECRET_KEY`: Clave para firmar JWTs
-
-### Frontend (`.env.local`)
-- `NEXT_PUBLIC_BASE_URL`: URL de la API backend (ej: `http://localhost:8000`)
-
-## Flujo de Uso
-
-1. **Administrador** crea una competencia con problemas de LeetCode y puntuaciones por dificultad
-2. **Estudiantes** se registran y crean o se unen a equipos
-3. **Durante la competencia**, los miembros registran soluciones aceptadas manualmente
-4. **Ranking en tiempo real**: Se ordena por puntos totales (descendente) y luego por tiempo (ascendente)
 
 ## Licencia
 
-Proyecto desarrollado para la Semana de la Ingeniería de la Universidad de La Sabana.
+Proyecto de la Universidad de la Sabana. Contacta al equipo de desarrollo para preguntas o contribuciones.
+
+**Última actualización**: Junio 2026
