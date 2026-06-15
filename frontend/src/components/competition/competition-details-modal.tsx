@@ -4,16 +4,18 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Trophy, Clock, Users, Target, AlertCircle } from "lucide-react"
+import { Trophy, Clock, Users, Target, AlertCircle, CheckCircle } from "lucide-react"
 import { Competition } from "@/lib/types"
 
 interface CompetitionDetailsModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   competition: Competition | undefined
+  isJoined?: boolean
+  onJoin?: () => void
 }
 
-export function CompetitionDetailsModal({ open, onOpenChange, competition }: CompetitionDetailsModalProps) {
+export function CompetitionDetailsModal({ open, onOpenChange, competition, isJoined, onJoin }: CompetitionDetailsModalProps) {
   if(!competition){return null}
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -104,7 +106,16 @@ export function CompetitionDetailsModal({ open, onOpenChange, competition }: Com
 
           {/* Actions */}
           <div className="flex gap-2 pt-4">
-            <Button className="flex-1 bg-accent hover:bg-accent/90">Unirme con mi Equipo</Button>
+            {isJoined ? (
+              <div className="flex-1 flex items-center gap-2 px-4 py-2 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 font-medium text-sm">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                Ya estás inscrito en esta competencia
+              </div>
+            ) : (
+              <Button className="flex-1 bg-accent hover:bg-accent/90" onClick={onJoin}>
+                Unirme con mi Equipo
+              </Button>
+            )}
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cerrar
             </Button>
