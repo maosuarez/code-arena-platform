@@ -18,7 +18,7 @@ interface NavbarProps {
 
 export function Navbar({ onLoginClick, onRegisterClick }: NavbarProps) {
   const { setTheme } = useTheme()
-  const { isAuthenticated, setIsAuthenticated, isLoading, currentUser } = useAuth()
+  const { isAuthenticated, setIsAuthenticated, isLoading, currentUser, setCurrentUser } = useAuth()
   const { setToken } = useToken()
   const { setTeamCode } = useTeamCode()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -29,8 +29,8 @@ export function Navbar({ onLoginClick, onRegisterClick }: NavbarProps) {
     localStorage.clear()
     setToken("")
     setIsAuthenticated(false)
+    setCurrentUser(null)
     setTeamCode("")
-    window.location.reload()
   }
 
   const ThemeToggle = ({ size = "sm" }: { size?: "sm" | "default" }) => (
