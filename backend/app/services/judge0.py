@@ -1,9 +1,33 @@
 import os
 import httpx
 from typing import List
+from urllib.parse import urlparse
 
 JUDGE0_API_URL = os.getenv("JUDGE0_API_URL", "https://judge0.maosuarez.com")
 JUDGE0_API_KEY = os.getenv("JUDGE0_API_KEY", "")
+
+# Validate JUDGE0_API_URL at module load time to catch misconfigurations early.
+_DEFAULT_ALLOWED_HOSTS = {"judge0.maosuarez.com"}
+_allowed_hosts_env = os.getenv("JUDGE0_ALLOWED_HOSTS", "")
+_ALLOWED_HOSTS = (
+    {h.strip() for h in _allowed_hosts_env.split(",") if h.strip()}
+    if _allowed_hosts_env
+    else _DEFAULT_ALLOWED_HOSTS
+)
+
+def _validate_judge0_url(url: str) -> None:
+    if not url.startswith("https://"):
+        raise RuntimeError(
+            f"JUDGE0_API_URL must start with 'https://'. Got: {url!r}"
+        )
+    parsed = urlparse(url)
+    if parsed.hostname not in _ALLOWED_HOSTS:
+        raise RuntimeError(
+            f"JUDGE0_API_URL host '{parsed.hostname}' is not in the allowlist {_ALLOWED_HOSTS}. "
+            "Add it via the JUDGE0_ALLOWED_HOSTS env var (comma-separated)."
+        )
+
+_validate_judge0_url(JUDGE0_API_URL)
 
 LANGUAGE_NAMES = {
     71: "Python 3",
