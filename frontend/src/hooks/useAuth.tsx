@@ -1,8 +1,11 @@
-// hooks/useAuth.ts
-import { useState, useEffect } from "react"
+"use client"
+
+// hooks/useAuth.tsx
+import { createContext, useContext, useState, useEffect } from "react"
+import type React from "react"
 import { apiRequest } from "@/lib/api"
 
-interface AuthUser {
+export interface AuthUser {
   id: string
   username: string
   email: string
@@ -10,7 +13,17 @@ interface AuthUser {
   is_admin: boolean
 }
 
-export function useAuth() {
+interface AuthContextValue {
+  isAuthenticated: boolean
+  setIsAuthenticated: React.Dispatch<React.SetStateAction<boolean>>
+  isLoading: boolean
+  currentUser: AuthUser | null
+  setCurrentUser: React.Dispatch<React.SetStateAction<AuthUser | null>>
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null)
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
@@ -37,5 +50,17 @@ export function useAuth() {
       .finally(() => setIsLoading(false))
   }, [])
 
-  return { isAuthenticated, setIsAuthenticated, isLoading, currentUser }
+  return (
+    <AuthContext.Provider value={{ isAuthenticated, setIsAuthenticated, isLoading, currentUser, setCurrentUser }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export function useAuth(): AuthContextValue {
+  const ctx = useContext(AuthContext)
+  if (!ctx) {
+    throw new Error("useAuth must be used inside <AuthProvider>")
+  }
+  return ctx
 }
