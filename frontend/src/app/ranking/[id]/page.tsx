@@ -179,6 +179,8 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
   const [highlightLastSolve, setHighlightLastSolve] = useState(true)
   const [lastSolveAnimation, setLastSolveAnimation] = useState<string | null>(null)
   const [reload, setReload] = useState(Boolean)
+  const [gameWinner, setGameWinner] = useState<string | null>(null)
+  const [podium, setPodium] = useState<{ teamCode: string; teamName: string }[]>([])
 
   const fetchCompetitionRanking = useCallback(async (competitionId: string) => {
     try {
@@ -200,6 +202,14 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
 
   useCompetitionSocket(idCom, (msg) => {
     if (msg.event === "new_submission") {
+      fetchCompetitionRanking(idCom)
+    }
+    if (msg.event === "game_over") {
+      const pod = Array.isArray(msg.data.podium)
+        ? (msg.data.podium as { teamCode: string; teamName: string }[])
+        : []
+      setPodium(pod)
+      setGameWinner(String(msg.data.teamName))
       fetchCompetitionRanking(idCom)
     }
   })
@@ -247,6 +257,16 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
 
   return (
     <div className={cn("min-h-screen bg-background", presentationMode && "p-0")}>
+      {gameWinner && (
+        <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-black text-center py-2 px-4 font-bold flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+          <span>🏁 Juego terminado — Podio:</span>
+          {podium.length > 0
+            ? podium.map((p, i) => (
+                <span key={p.teamCode}>{(i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉")} {p.teamName}</span>
+              ))
+            : <span>🥇 {gameWinner}</span>}
+        </div>
+      )}
       {/* Header */}
       {!presentationMode && (
         <div className="sticky top-16 z-40 border-b border-border bg-background/95 backdrop-blur">
