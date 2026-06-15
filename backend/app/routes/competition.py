@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Body, status
@@ -12,6 +13,17 @@ from app.routes.auth import get_current_user, require_admin
 from app.services.users import validate_competition_date
 from app.services.websocket_manager import manager
 from app.services.judge0 import judge_submission
+
+logger = logging.getLogger(__name__)
+
+MAX_SOURCE_CODE_BYTES = 65536  # 64 KB
+
+
+def _strip_hidden_instructions(competition: dict) -> dict:
+    """Remove hidden_instructions from all problems in a competition dict (in-place)."""
+    for problem in competition.get("problems", []):
+        problem.pop("hidden_instructions", None)
+    return competition
 
 router = APIRouter()
 
@@ -27,14 +39,18 @@ async def create_competition(req: RequestCompetition, _user: dict = Depends(requ
     dict_req['id'] = str(uuid.uuid4())
 
     # Strip testCases from problems before building Competition (test cases stored separately)
+    # and ensure every problem has an id (Problem.id is required; ProblemCreate.id is optional)
     for p in dict_req.get("problems", []):
         p.pop("testCases", None)
+        if not p.get("id"):
+            p["id"] = str(uuid.uuid4())
 
     # Validar y transformar el modelo
     try:
         comp = Competition.model_validate(dict_req, strict=False)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creando el Competition: {str(e)}")
+    except Exception:
+        logger.exception("Error validando el modelo Competition")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
     # Verificar si ya existe una competición con ese título
@@ -51,8 +67,9 @@ async def create_competition(req: RequestCompetition, _user: dict = Depends(requ
     # Insertar en la base de datos
     try:
         await db["competition"].insert_one(comp_doc)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al guardar: {str(e)}")
+    except Exception:
+        logger.exception("Error al guardar la competición en la base de datos")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
     # Extraer y guardar casos de prueba en colección separada (nunca expuestos al cliente)
     for orig_problem in req.problems:
@@ -98,19 +115,31 @@ async def get_all_competitions():
                     if "_id" in p:
                         p["id"] = str(p.pop("_id"))
 
+            _strip_hidden_instructions(comp)
             competitions.append(comp)
 
         return {"list": competitions}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al obtener competiciones: {str(e)}")
+        logger.exception("Error al obtener competiciones")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
 @router.post("/join")
 async def join_team_to_competition(
     teamCode: str = Body(...),
-    competitionId: str = Body(...)
+    competitionId: str = Body(...),
+    user: dict = Depends(get_current_user),
 ):
+    # Autorización: solo puedes inscribir tu propio equipo (o ser admin).
+    if not user.get("is_admin", False) and user.get("teamCode") != teamCode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo puedes inscribir el equipo al que perteneces",
+        )
+
     competition = await db["competition"].find_one({'id': competitionId})
     if not competition:
         raise HTTPException(status_code=404, detail="Competición no encontrada para ese usuario")
@@ -120,8 +149,9 @@ async def join_team_to_competition(
             {"id": competitionId, "teams": {"$ne": teamCode}},
             {"$addToSet": {"teams": teamCode}}
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al actualizar equipos: {str(e)}")
+    except Exception:
+        logger.exception("Error al actualizar equipos en la competición")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
     if result.modified_count == 0:
         raise HTTPException(status_code=400, detail="El equipo ya está registrado en esta competencia")
@@ -161,6 +191,7 @@ async def get_competition_by_id(competitionId: str):
         except Exception:
             pass  # Si ya es datetime o falla la conversión, se deja como está
 
+    _strip_hidden_instructions(competition)
     return {"competition": competition}
 
 @router.get("/private/{competitionId}")
@@ -242,6 +273,7 @@ async def get_competition_private(
             }
 
     # 📤 Respuesta final
+    _strip_hidden_instructions(competition)
     return {
         "competition": competition,
         "team": team_data
@@ -271,6 +303,8 @@ async def create_submission(
         # Judge0 mode: validate via actual code execution
         if not req.source_code or not req.language_id:
             raise HTTPException(status_code=400, detail="Se requieren source_code y language_id")
+        if len(req.source_code.encode("utf-8")) > MAX_SOURCE_CODE_BYTES:
+            raise HTTPException(status_code=400, detail="El código fuente excede el tamaño máximo permitido")
     elif fallback_code:
         # Fallback mode: simple validation code
         if req.validation_code != fallback_code:
@@ -294,12 +328,18 @@ async def create_submission(
         if not problem_data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problema no encontrado en la competencia")
 
+        # Validar lenguaje permitido para este problema (Fix HIGH-4)
+        if judge_key and req.language_id is not None:
+            allowed_languages = problem_data.get("language_ids", list(range(1, 200)))
+            if req.language_id not in allowed_languages:
+                raise HTTPException(status_code=400, detail="Lenguaje no permitido para este problema")
+
         # Calcular puntos
         difficulty = problem_data.get("difficulty")
         points = competition.get("scoring", {}).get(difficulty, 0)
 
         # Validar y calcular tiempo desde inicio
-        now = datetime.utcnow().replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         from datetime import timedelta
 
         # Prefer explicit start_time/end_time; fall back to date + duration
@@ -365,8 +405,9 @@ async def create_submission(
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{e}")
+    except Exception:
+        logger.exception("Error inesperado en create_submission")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
     # Judge0 validation (only if API key is configured and source_code was provided)
     if judge_key and req.source_code:
@@ -397,8 +438,9 @@ async def create_submission(
                 ).dict()}
             }
         )
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error al actualizar equipo: {str(e)}")
+    except Exception:
+        logger.exception("Error al actualizar puntos del equipo tras submission")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
     # WebSocket broadcast para ranking en tiempo real
     await manager.broadcast(competitionId, {
@@ -488,8 +530,9 @@ async def update_competition(
             {"id": competitionId},
             {"$set": update_data},
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al actualizar: {str(e)}")
+    except Exception:
+        logger.exception("Error al actualizar la competición")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
     return {"message": "Competición actualizada", "id": competitionId}
 

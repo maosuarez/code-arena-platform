@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from passlib.context import CryptContext
 import random
@@ -17,12 +17,18 @@ def generate_unique_code(existing_codes: set, length: int = 6) -> str:
         if code not in existing_codes:
             return code
 
-def validate_competition_date(date_str: str) -> datetime:
+def validate_competition_date(date_str) -> datetime:
     try:
-        normalized = date_str.replace("Z", "+00:00")
-        return datetime.fromisoformat(normalized)
+        if isinstance(date_str, datetime):
+            parsed = date_str
+        else:
+            parsed = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Fecha de competencia inválida. Debe estar en formato ISO 8601."
         )
+    # Normalizar a UTC-aware para evitar restas naive/aware en el cálculo de tiempos
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
