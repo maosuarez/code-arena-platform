@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 import string
 import random
@@ -6,6 +7,8 @@ from pymongo.errors import DuplicateKeyError
 from app.database import db
 from app.models_entity.teams import TeamCreateRequest, TeamCode, JoinTeamRequest
 from app.routes.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -27,15 +30,16 @@ async def create_team(request: TeamCreateRequest, current_user: dict = Depends(g
                     "maxMembers": request.maxMembers,
                     "currentMembers": 1,
                 }, strict=False)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error creando el TeamCode: {str(e)}")
+            except Exception:
+                logger.exception("Error validando el modelo TeamCode")
+                raise HTTPException(status_code=500, detail="Error interno del servidor")
             try:
                 insert_result = await db["teams"].insert_one(team.dict())
                 break
             except DuplicateKeyError:
                 continue
         else:
-            raise HTTPException(status_code=500, detail="No se pudo generar un código único")
+            raise HTTPException(status_code=500, detail="No se pudo generar un código único para el equipo")
 
         if insert_result is None:
             raise HTTPException(status_code=500, detail="No se pudo generar un código único")
@@ -65,8 +69,9 @@ async def create_team(request: TeamCreateRequest, current_user: dict = Depends(g
     except HTTPException as http_err:
         raise http_err
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno al crear el equipo: {str(e)}")
+    except Exception:
+        logger.exception("Error interno al crear el equipo")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 # ────────────────────────────────────────────────────────────────
 @router.post("/join")
@@ -101,8 +106,9 @@ async def join_team(request: JoinTeamRequest, current_user: dict = Depends(get_c
 
     except HTTPException as http_err:
         raise http_err
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno al unirse al equipo: {str(e)}")
+    except Exception:
+        logger.exception("Error interno al unirse al equipo")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
 # ────────────────────────────────────────────────────────────────
@@ -131,8 +137,9 @@ async def delete_team(current_user: dict = Depends(get_current_user)):
 
     except HTTPException as http_err:
         raise http_err
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno al eliminar el equipo: {str(e)}")
+    except Exception:
+        logger.exception("Error interno al eliminar el equipo")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
 # ────────────────────────────────────────────────────────────────
@@ -150,7 +157,6 @@ async def get_team_by_code(team_code: str, current_user: dict = Depends(get_curr
             {
                 "id": str(member["_id"]),
                 "username": member["username"],
-                "email": member["email"],
             }
             for member in members_list
         ]
@@ -164,6 +170,7 @@ async def get_team_by_code(team_code: str, current_user: dict = Depends(get_curr
 
     except HTTPException as http_err:
         raise http_err
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno al obtener el equipo: {str(e)}")
+    except Exception:
+        logger.exception("Error interno al obtener el equipo")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 

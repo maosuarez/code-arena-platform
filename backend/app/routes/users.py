@@ -1,10 +1,14 @@
-from fastapi import APIRouter, HTTPException, Depends
+import logging
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from pymongo.errors import PyMongoError
 from app.database import db
 from app.models_entity.users import User, RegisterRequest
 from app.models_entity.general import Token
 from app.routes.auth import (get_current_user, get_password_hash, verify_password, create_access_token, require_admin)
+from app.limiter import limiter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -15,7 +19,8 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/register", response_model=Token)
-async def register_user(user: RegisterRequest):
+@limiter.limit("5/hour")
+async def register_user(request: Request, user: RegisterRequest):
     try:
         if await db["users"].find_one({"$or": [{"email": user.email}, {"username": user.username}]}):
             raise HTTPException(status_code=400, detail="Email o nombre de usuario ya registrado")
@@ -32,8 +37,9 @@ async def register_user(user: RegisterRequest):
         token = create_access_token({"sub": user.email, "id": user_id})
         return {"access_token": token, "token_type": "bearer"}
 
-    except PyMongoError as e:
-        raise HTTPException(status_code=500, detail=f"Error de base de datos: {str(e)}")
+    except PyMongoError:
+        logger.exception("Error de base de datos al registrar usuario")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
 @router.get("/me")
