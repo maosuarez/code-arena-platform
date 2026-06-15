@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { NavbarWrapper } from "@/components/navbar-wrapper"
 import { ApiHealthBanner } from "@/components/api-health-banner"
+import { Providers } from "@/components/providers"
 import { Suspense } from "react"
 import "./globals.css"
 
@@ -25,14 +26,16 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning>
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <Suspense fallback={null}>
-            <div className="min-h-screen bg-background">
-              <ApiHealthBanner />
-              <NavbarWrapper />
-              <main className="flex-1">{children}</main>
-            </div>
-            <Toaster />
-          </Suspense>
+          <Providers>
+            <Suspense fallback={null}>
+              <div className="min-h-screen bg-background">
+                <ApiHealthBanner />
+                <NavbarWrapper />
+                <main className="flex-1">{children}</main>
+              </div>
+              <Toaster />
+            </Suspense>
+          </Providers>
         </ThemeProvider>
         {process.env.VERCEL === "1" && <Analytics />}
       </body>
