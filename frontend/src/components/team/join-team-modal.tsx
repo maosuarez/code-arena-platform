@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { UserPlus, Hash } from "lucide-react"
 import { apiRequest } from "@/lib/api"
+import { useTeamCode } from "@/hooks/useTeamCode"
 
 interface JoinTeamModalProps {
   open: boolean
@@ -16,60 +17,46 @@ interface JoinTeamModalProps {
 }
 
 export function JoinTeamModal({ open, onOpenChange }: JoinTeamModalProps) {
-  const [teamCode, setTeamCode] = useState("")
+  const [inputCode, setInputCode] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const { setTeamCode } = useTeamCode()
 
   const handleJoinTeam = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!teamCode.trim()) return
+    if (!inputCode.trim()) return
 
     setIsLoading(true)
     try {
       const response = await apiRequest('/teams/join', {
         method: 'POST',
         body: {
-          teamCode: teamCode.replace("-", "")
+          teamCode: inputCode.replace("-", "")
         },
         token: true
-      }
-    )
-      // Puedes manejar la respuesta aquí si lo necesitas
+      })
       setTeamCode(response.teamCode)
       localStorage.setItem('teamCode', response.teamCode)
-      window.location.reload()
+      setInputCode("")
+      onOpenChange(false)
     } catch (error) {
-      console.error("Error al crear el equipo:", error)
-      // Puedes mostrar un toast o alerta aquí si quieres
+      console.error("Error al unirse al equipo:", error)
     } finally {
       setIsLoading(false)
-      onOpenChange(false)
     }
-    
-    setIsLoading(false)
-    onOpenChange(false)
-
-    // Reset form
-    setTeamCode("")
   }
 
   const formatTeamCode = (value: string): string => {
-    // 1. Limpiar y convertir a mayúsculas
     const cleaned = value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
-
-    // 2. Limitar a máximo 6 caracteres
     const trimmed = cleaned.slice(0, 6)
-
-    // 3. Insertar guion después de los primeros 3
     return trimmed.length > 3
       ? `${trimmed.slice(0, 3)}-${trimmed.slice(3)}`
       : trimmed
-}
+  }
 
   const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatTeamCode(e.target.value)
     if (formatted.length <= 7) {
-      // 6 chars + 1 dashes
-      setTeamCode(formatted)
+      setInputCode(formatted)
     }
   }
 
@@ -92,14 +79,14 @@ export function JoinTeamModal({ open, onOpenChange }: JoinTeamModalProps) {
             </Label>
             <Input
               id="team-code"
-              value={teamCode}
+              value={inputCode}
               onChange={handleCodeChange}
               placeholder="ABC-DEF"
               className="text-center text-lg font-mono tracking-wider"
               required
             />
             <p className="text-xs text-muted-foreground text-center">
-              El código debe tener 12 caracteres (formato: XXX-XXX)
+              El código debe tener 6 caracteres (formato: XXX-XXX)
             </p>
           </div>
 
@@ -113,7 +100,7 @@ export function JoinTeamModal({ open, onOpenChange }: JoinTeamModalProps) {
             type="submit"
             className="w-full bg-transparent"
             variant="outline"
-            disabled={isLoading || teamCode.length < 7}
+            disabled={isLoading || inputCode.length < 7}
           >
             {isLoading ? "Uniéndose..." : "Unirse al Equipo"}
           </Button>
