@@ -17,3 +17,4 @@ PyYAML==6.0.2
 rich==14.1.0
 python-multipart==0.0.20
 aiomqtt==2.3.0
+slowapi==0.1.9
