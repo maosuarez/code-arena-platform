@@ -17,3 +17,4 @@ frontend/out/
 
 # Misc
 .DS_Store
+test/node_modules/
