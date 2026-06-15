@@ -57,7 +57,12 @@ export default function HomePage() {
         }
       })
       toast.info('Se te agrego a una Competencia')
-      window.location.reload()
+      // Update local competition list so the card reflects "Ya estás inscrito" without a full reload
+      setListCompetition(prev =>
+        prev.map(c =>
+          c.id === compet.id ? { ...c, teams: [...(Array.isArray(c.teams) ? c.teams : []), teamCode] } : c
+        )
+      )
     } catch (error) {
       console.error("Error al dejar el equipo:", error)
       // Puedes mostrar un toast o alerta aquí si quieres
@@ -378,8 +383,8 @@ export default function HomePage() {
                             size="sm"
                             className="hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-300"
                           >
-                            <Settings className="mr-2 h-4 w-4" />
-                            Administrar
+                            <Play className="mr-2 h-4 w-4" />
+                            Entrar al torneo
                           </Button>
                         </Link>
                       </>
@@ -401,6 +406,13 @@ export default function HomePage() {
         open={competitionDetailsOpen}
         onOpenChange={setCompetitionDetailsOpen}
         competition={competitionOpen}
+        isJoined={!!(competitionOpen && teamCode && Array.isArray(competitionOpen.teams) && competitionOpen.teams.includes(teamCode))}
+        onJoin={() => {
+          if (competitionOpen) {
+            setCompetitionDetailsOpen(false)
+            handleJoin(competitionOpen)
+          }
+        }}
       />
     </div>
   )
