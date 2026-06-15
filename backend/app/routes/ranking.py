@@ -1,8 +1,11 @@
+import logging
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from app.database import db
 import random
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -11,14 +14,21 @@ def format_seconds(seconds: int) -> str:
 
 def get_time_remaining(start_str: str, duration_minutes: int) -> str:
     try:
-        # 🕒 Parsear la fecha de inicio
-        start_time = datetime.fromisoformat(start_str)
-    except ValueError:
+        # 🕒 Parsear la fecha de inicio (acepta datetime o string ISO)
+        if isinstance(start_str, datetime):
+            start_time = start_str
+        else:
+            start_time = datetime.fromisoformat(start_str)
+    except (ValueError, TypeError):
         return "Fecha inválida"
+
+    # 🌐 Normalizar a UTC-aware (las fechas guardadas suelen ser naive)
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
 
     # ⏱️ Calcular tiempo final
     end_time = start_time + timedelta(minutes=duration_minutes)
-    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
 
     # 📉 Diferencia en segundos
     remaining_seconds = int((end_time - now).total_seconds())
@@ -132,8 +142,11 @@ async def get_competition_ranking(competitionId: str):
         # Eliminar campo temporal antes de retornar
         for r in rankings:
             r.pop("_totalTimeSeconds", None)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error de base de datos: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error al obtener el ranking")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
     return {"ranking": rankings, 'competition': {
         'title': competition.get('title', ''),
