@@ -11,7 +11,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Progress } from "@/components/ui/progress"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import {
@@ -162,14 +161,18 @@ export default function CreateCompetitionPage() {
 
   const publishCompetition = async () => {
     setIsLoading(true)
-    const [year, month, day] = startDate.split("-").map(Number)
-    const [hours, minutes] = startTime.split(":").map(Number)
-    const competitionDate = new Date(year, month - 1, day, hours, minutes)
+    // Anchor to Bogotá time (UTC-5, no DST) explicitly instead of letting the
+    // browser's ambient OS timezone decide — a misconfigured client clock
+    // silently produced hours-off competition times before this fix.
+    const competitionDate = new Date(`${startDate}T${startTime}:00-05:00`)
+    const endDateTime = new Date(competitionDate.getTime() + duration * 60000)
 
     const payload = {
       title,
       description,
       date: competitionDate,
+      start_time: competitionDate,
+      end_time: endDateTime,
       status: "active",
       duration,
       teams: [],
@@ -287,12 +290,16 @@ problems:
       }
       if (Array.isArray(parsed.rules)) setRules(parsed.rules.map(String))
 
-      // Parse start_time into date + time fields
+      // Parse start_time into date + time fields.
+      // Both must come from the same timezone frame (local) — mixing toISOString()
+      // (UTC) for the date with toTimeString() (local) for the time silently rolls
+      // the date forward whenever the local time is late enough to cross midnight UTC.
       if (parsed.start_time) {
         const dt = new Date(parsed.start_time)
         if (!isNaN(dt.getTime())) {
-          const dateStr = dt.toISOString().slice(0, 10)
-          const timeStr = dt.toTimeString().slice(0, 5)
+          const pad = (n: number) => String(n).padStart(2, "0")
+          const dateStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+          const timeStr = `${pad(dt.getHours())}:${pad(dt.getMinutes())}`
           setStartDate(dateStr)
           setStartTime(timeStr)
         }
@@ -605,7 +612,7 @@ problems:
                   {problems.length > 0 && (
                     <div>
                       <h4 className="font-semibold mb-3">Problemas ({problems.length})</h4>
-                      <ScrollArea className="max-h-96">
+                      <div className="max-h-96 overflow-y-auto pr-2">
                         <div className="space-y-3">
                           {problems.map(problem => (
                             <Card key={problem.id} className="p-0 overflow-hidden">
@@ -682,7 +689,7 @@ problems:
                             </Card>
                           ))}
                         </div>
-                      </ScrollArea>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -157,12 +157,50 @@ async def join_team_to_competition(
         raise HTTPException(status_code=400, detail="El equipo ya está registrado en esta competencia")
 
     competition_updated = await db["competition"].find_one({"id": competitionId})
+
+    # Avisa al resto del equipo (vía su propio topic) que ya quedaron inscritos,
+    # para que la UI se actualice sola y nadie intente unirse de nuevo sin querer.
+    await manager.broadcast_team(teamCode, {
+        "event": "team_joined_competition",
+        "data": {"competitionId": competitionId, "teamCode": teamCode},
+    })
+
     return {
         "message": "Equipo registrado exitosamente",
         "competitionId": competitionId,
         "teamCode": teamCode,
         "totalTeams": len(competition_updated.get("teams", []))
     }
+
+class CheerRequest(BaseModel):
+    message: str
+
+@router.post("/{competitionId}/cheer")
+async def cheer_team(
+    competitionId: str,
+    req: CheerRequest,
+    user: dict = Depends(get_current_user),
+):
+    team_code = user.get("teamCode")
+    if not team_code:
+        raise HTTPException(status_code=400, detail="Usuario sin equipo asignado")
+
+    message = req.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
+    if len(message) > 200:
+        raise HTTPException(status_code=400, detail="El mensaje es demasiado largo")
+
+    await manager.broadcast(competitionId, {
+        "event": "cheer",
+        "data": {
+            "teamCode": team_code,
+            "member": user.get("username"),
+            "message": message,
+        },
+    })
+    return {"message": "Ánimo enviado"}
+
 
 @router.get("/problem-stats")
 async def get_problem_stats():
@@ -238,11 +276,11 @@ async def get_competition_private(
             all_teams = []
 
             for code in team_codes:
-                team = await db["teams"].find_one({"code": code})
-                if team:
+                other_team = await db["teams"].find_one({"code": code})
+                if other_team:
                     all_teams.append({
-                        "code": team.get("code"),
-                        "points": team.get("points", 0)
+                        "code": other_team.get("code"),
+                        "points": other_team.get("points", 0)
                     })
 
             # 📊 Ranking con empates
@@ -262,6 +300,7 @@ async def get_competition_private(
             # 📦 Datos del equipo
             team_data = {
                 "team": {
+                    "code": team.get("code"),
                     "name": team.get("teamName"),
                     "members": members,
                     "submissions": team.get("submissions", []),
@@ -442,11 +481,14 @@ async def create_submission(
         logger.exception("Error al actualizar puntos del equipo tras submission")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
-    # WebSocket broadcast para ranking en tiempo real
+    # WebSocket broadcast para ranking en tiempo real.
+    # Los campos coinciden 1:1 con Submission para que el equipo no note diferencia
+    # entre lo que llega por socket y lo que se obtiene al recargar.
     await manager.broadcast(competitionId, {
         "event": "new_submission",
         "data": {
             "problem": problemId,
+            "status": "AC",
             "member": username,
             "points": points,
             "teamCode": team_code,

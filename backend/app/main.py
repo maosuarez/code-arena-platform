@@ -11,9 +11,10 @@ from app.limiter import limiter
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = logging.getLogger(__name__)
-
 # ─── Security headers injected on every response ──────────────────────────────
 
 _SECURITY_HEADERS = {
@@ -34,16 +35,20 @@ async def seed_admin():
             "Set this env var on first deploy to create the admin account."
         )
         return
-    existing = await db["users"].find_one({"email": "admin@codearena.local"})
-    if not existing:
-        await db["users"].insert_one({
-            "username": "admin",
-            "email": "admin@codearena.local",
-            "password": get_password_hash(admin_password),
-            "is_admin": True,
-            "teamCode": None,
-            "leetcode_username": None,
-        })
+    await db["users"].update_one(
+        {"email": "admin@codearena.local"},
+        {
+            "$setOnInsert": {
+                "username": "admin",
+                "email": "admin@codearena.local",
+                "password": get_password_hash(admin_password),
+                "is_admin": True,
+                "teamCode": None,
+                "leetcode_username": None,
+            }
+        },
+        upsert=True,
+    )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

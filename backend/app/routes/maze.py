@@ -30,17 +30,30 @@ async def get_maze_state(competitionId: str):
     raw_progress = await db["maze_progress"].find(
         {"competitionId": competitionId}, {"_id": 0}
     ).to_list(length=200)
+    progress_by_team = {p["teamCode"]: p for p in raw_progress}
+
+    # Un equipo solo obtiene un documento en maze_progress cuando intenta abrir
+    # su primera puerta ($setOnInsert en /unlock). Si solo iteramos raw_progress,
+    # un equipo recién inscrito que aún no abrió ninguna puerta queda fuera de
+    # la lista y el frontend ve availablePoints=0 aunque sí tenga puntos —
+    # por eso una puerta que cuesta exactamente lo que el equipo tiene parece
+    # "no alcanzarle". Partimos de los equipos inscritos en la competencia para
+    # que todos aparezcan desde el principio.
+    competition = await db["competition"].find_one({"id": competitionId}, {"_id": 0, "teams": 1})
+    registered_team_codes = competition.get("teams", []) if competition else []
+    all_team_codes = list(dict.fromkeys([*registered_team_codes, *progress_by_team.keys()]))
 
     teams = []
-    for p in raw_progress:
+    for team_code in all_team_codes:
+        p = progress_by_team.get(team_code, {})
         team = await db["teams"].find_one(
-            {"code": p["teamCode"]}, {"_id": 0, "teamName": 1, "points": 1, "avatar": 1}
+            {"code": team_code}, {"_id": 0, "teamName": 1, "points": 1, "avatar": 1}
         )
         spent = p.get("spentPoints", 0)
         earned = team.get("points", 0) if team else 0
         teams.append({
-            "teamCode": p["teamCode"],
-            "teamName": team.get("teamName", p["teamCode"]) if team else p["teamCode"],
+            "teamCode": team_code,
+            "teamName": team.get("teamName", team_code) if team else team_code,
             "avatar": team.get("avatar", "") if team else "",
             "currentNodeId": p.get("currentNodeId", config.get("startNodeId")),
             "unlockedDoors": p.get("unlockedDoors", []),
@@ -105,23 +118,37 @@ async def unlock_door(
         upsert=True,
     )
 
-    # Atomic: adjacency + not already unlocked + affordable
-    result = await db["maze_progress"].update_one(
-        {
-            "competitionId": competitionId,
-            "teamCode": team_code,
-            "currentNodeId": door["from_node"],
-            "unlockedDoors": {"$ne": door_id},
-            "$expr": {"$lte": [{"$add": ["$spentPoints", door["cost"]]}, team_points]},
-        },
-        {
-            "$inc": {"spentPoints": door["cost"]},
-            "$addToSet": {"unlockedDoors": door_id},
-            "$set": {"currentNodeId": door["to_node"]},
-        },
+    # Puertas sin dirección: se pueden cruzar desde cualquiera de sus dos nodos.
+    progress = await db["maze_progress"].find_one(
+        {"competitionId": competitionId, "teamCode": team_code}
     )
+    current = progress.get("currentNodeId", config["startNodeId"]) if progress else config["startNodeId"]
+    if current == door["from_node"]:
+        target_node = door["to_node"]
+    elif current == door["to_node"]:
+        target_node = door["from_node"]
+    else:
+        target_node = None
 
-    if result.modified_count == 0:
+    result = None
+    if target_node is not None:
+        # Atomic: adjacency + not already unlocked + affordable
+        result = await db["maze_progress"].update_one(
+            {
+                "competitionId": competitionId,
+                "teamCode": team_code,
+                "currentNodeId": current,
+                "unlockedDoors": {"$ne": door_id},
+                "$expr": {"$lte": [{"$add": ["$spentPoints", door["cost"]]}, team_points]},
+            },
+            {
+                "$inc": {"spentPoints": door["cost"]},
+                "$addToSet": {"unlockedDoors": door_id},
+                "$set": {"currentNodeId": target_node},
+            },
+        )
+
+    if result is None or result.modified_count == 0:
         progress = await db["maze_progress"].find_one(
             {"competitionId": competitionId, "teamCode": team_code}
         )
@@ -129,7 +156,7 @@ async def unlock_door(
         spent = progress.get("spentPoints", 0) if progress else 0
         unlocked = progress.get("unlockedDoors", []) if progress else []
 
-        if door["from_node"] != current:
+        if door["from_node"] != current and door["to_node"] != current:
             raise HTTPException(status_code=400, detail="No puedes abrir esa puerta desde tu posición actual")
         if door_id in unlocked:
             raise HTTPException(status_code=400, detail="Esa puerta ya está abierta")
@@ -144,14 +171,14 @@ async def unlock_door(
         "data": {
             "teamCode": team_code,
             "doorId": door_id,
-            "newNode": door["to_node"],
+            "newNode": target_node,
             "cost": door["cost"],
         },
     })
 
     # 🏁 Condición de meta: el equipo llegó al nodo meta. El juego no termina con el
     # primer equipo, sino cuando se completa el PODIO (los primeros 3 en llegar).
-    won = door["to_node"] == config.get("goalNodeId")
+    won = target_node == config.get("goalNodeId")
     position = None
     podium_complete = False
     if won:
@@ -229,7 +256,7 @@ async def unlock_door(
 
     return {
         "message": "Puerta abierta",
-        "newNode": door["to_node"],
+        "newNode": target_node,
         "availablePoints": earned - spent,
         "reachedGoal": won,
         "position": position,

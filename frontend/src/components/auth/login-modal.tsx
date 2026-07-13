@@ -31,7 +31,7 @@ export function LoginModal({ open, onOpenChange, initialTab = "login" }: LoginMo
   const {setTeamCode} = useTeamCode()
 
   useEffect(() => {
-    if (!open) {
+    if (open) {
       setActiveTab(initialTab)
       setLoginError("")
       setRegisterError("")

@@ -14,7 +14,6 @@ import { Users, Trophy, Target, Plus, Eye, Lock, Map, Pencil, X, CheckCircle, Ch
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import Link from "next/link"
 import { apiRequest } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
@@ -35,6 +34,27 @@ type ProblemDraft = {
 }
 
 const ALL_LANGUAGE_IDS = [71, 62, 54, 63]
+
+// The platform targets Bogotá (UTC-5, no DST) exclusively. Competition times
+// must be converted through this fixed offset explicitly rather than through
+// `new Date(...)`'s ambient OS-timezone parsing, which silently produces
+// hours-off values whenever the browser/host clock isn't set to Bogotá.
+const BOGOTA_OFFSET_MS = -5 * 60 * 60 * 1000
+
+function isoToBogotaInputValue(iso?: string): string {
+  if (!iso) return ""
+  const utcMs = new Date(iso).getTime()
+  if (Number.isNaN(utcMs)) return ""
+  const bogota = new Date(utcMs + BOGOTA_OFFSET_MS)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${bogota.getUTCFullYear()}-${pad(bogota.getUTCMonth() + 1)}-${pad(bogota.getUTCDate())}T${pad(bogota.getUTCHours())}:${pad(bogota.getUTCMinutes())}`
+}
+
+function bogotaInputValueToIso(local: string): string | undefined {
+  if (!local) return undefined
+  const ms = new Date(`${local}:00-05:00`).getTime()
+  return Number.isNaN(ms) ? undefined : new Date(ms).toISOString()
+}
 
 interface AdminUser {
   id: string
@@ -62,6 +82,7 @@ interface AdminCompetition {
   scoring?: { easy: number; medium: number; hard: number }
   start_time?: string
   end_time?: string
+  date?: string
   duration?: number
   maxTeamSize?: number
 }
@@ -149,8 +170,14 @@ export default function AdminDashboard() {
     setEditTitle(comp.title)
     setEditDescription(comp.description ?? "")
     setEditStatus(comp.status)
-    setEditStartTime(comp.start_time ? comp.start_time.slice(0, 16) : "")
-    setEditEndTime(comp.end_time ? comp.end_time.slice(0, 16) : "")
+    // Older competitions only stored `date` + `duration`; fall back to those
+    // when start_time/end_time were never set.
+    const startSource = comp.start_time ?? comp.date
+    const endSource = comp.end_time ?? (startSource && comp.duration
+      ? new Date(new Date(startSource).getTime() + comp.duration * 60000).toISOString()
+      : undefined)
+    setEditStartTime(isoToBogotaInputValue(startSource))
+    setEditEndTime(isoToBogotaInputValue(endSource))
     setEditEasy(comp.scoring?.easy ?? 10)
     setEditMedium(comp.scoring?.medium ?? 30)
     setEditHard(comp.scoring?.hard ?? 50)
@@ -196,8 +223,15 @@ export default function AdminDashboard() {
           testCases: p.testCases,
         })),
       }
-      if (editStartTime) payload.start_time = new Date(editStartTime).toISOString()
-      if (editEndTime) payload.end_time = new Date(editEndTime).toISOString()
+      const startIso = bogotaInputValueToIso(editStartTime)
+      const endIso = bogotaInputValueToIso(editEndTime)
+      if (startIso) {
+        payload.start_time = startIso
+        // Several views (home listing, ranking) still key off `date` instead
+        // of start_time — keep it in sync so an edit is visible everywhere.
+        payload.date = startIso
+      }
+      if (endIso) payload.end_time = endIso
 
       await apiRequest(`/competition/${editingComp.id}`, {
         method: "PATCH",
@@ -600,7 +634,7 @@ export default function AdminDashboard() {
 
               {/* Existing problems list */}
               {editProblems.length > 0 && (
-                <ScrollArea className="max-h-64">
+                <div className="max-h-64 overflow-y-auto pr-2">
                   <div className="space-y-2">
                     {editProblems.map(problem => (
                       <div key={problem.id} className="border rounded-lg overflow-hidden">
@@ -676,7 +710,7 @@ export default function AdminDashboard() {
                       </div>
                     ))}
                   </div>
-                </ScrollArea>
+                </div>
               )}
 
               {/* Add new problem form */}

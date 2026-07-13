@@ -31,6 +31,8 @@ services:
       MQTT_USERNAME: ${MQTT_USERNAME}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
       MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-code-arena}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-password}
+      
     depends_on:
       - mongo
     networks:

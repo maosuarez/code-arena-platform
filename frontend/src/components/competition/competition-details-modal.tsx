@@ -52,7 +52,7 @@ export function CompetitionDetailsModal({ open, onOpenChange, competition, isJoi
             </Badge>
             <Badge variant="outline" className="flex items-center gap-1">
               <Users className="h-3 w-3" />
-              {competition.teams} equipos
+              {competition.teams.length} equipos
             </Badge>
             <Badge variant="outline" className="flex items-center gap-1">
               <Target className="h-3 w-3" />

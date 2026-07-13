@@ -24,10 +24,12 @@ import {
   Clock,
   Award,
   ArrowLeft,
+  Flag,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { apiRequest } from "@/lib/api"
 import { useCompetitionSocket } from "@/hooks/useCompetitionSocket"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 
 type Rank = {
@@ -154,6 +156,19 @@ interface ResposeCompetition{
   teams: number
   totalSolved: number
   resTime: string
+  endTime?: string
+  status?: string
+  podium?: { teamCode: string; teamName: string }[]
+  winner?: string
+  winnerName?: string
+}
+
+function formatHHMMSS(totalSeconds: number): string {
+  const clamped = Math.max(0, totalSeconds)
+  const hours = Math.floor(clamped / 3600)
+  const minutes = Math.floor((clamped % 3600) / 60)
+  const seconds = Math.floor(clamped % 60)
+  return [hours, minutes, seconds].map(n => String(n).padStart(2, "0")).join(":")
 }
 
 export default function RankingPage({ params }: { params: Promise<{ id: string }> }) {
@@ -181,6 +196,8 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
   const [reload, setReload] = useState(Boolean)
   const [gameWinner, setGameWinner] = useState<string | null>(null)
   const [podium, setPodium] = useState<{ teamCode: string; teamName: string }[]>([])
+  const [podiumDialogOpen, setPodiumDialogOpen] = useState(false)
+  const [resTimeLeft, setResTimeLeft] = useState<string | null>(null)
 
   const fetchCompetitionRanking = useCallback(async (competitionId: string) => {
     try {
@@ -191,6 +208,11 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
 
       setRankData(response.ranking);
       setResComp(response.competition)
+      const comp = response.competition as ResposeCompetition
+      if (comp?.status === "completed" && comp.winnerName) {
+        setGameWinner(comp.winnerName)
+        if (Array.isArray(comp.podium)) setPodium(comp.podium)
+      }
     } catch (err) {
       console.error("❌ Error al cargar el ranking:", err);
     }
@@ -199,6 +221,22 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
   useEffect(() => {
     fetchCompetitionRanking(idCom)
   }, [reload, idCom])
+
+  useEffect(() => {
+    if (!resComp?.endTime || gameWinner) {
+      if (!resComp?.endTime) setResTimeLeft(null)
+      return
+    }
+    const endMs = new Date(resComp.endTime).getTime()
+    const tick = () => setResTimeLeft(formatHHMMSS((endMs - Date.now()) / 1000))
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [resComp?.endTime, gameWinner])
+
+  useEffect(() => {
+    if (gameWinner) setPodiumDialogOpen(true)
+  }, [gameWinner])
 
   useCompetitionSocket(idCom, (msg) => {
     if (msg.event === "new_submission") {
@@ -257,16 +295,6 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
 
   return (
     <div className={cn("min-h-screen bg-background", presentationMode && "p-0")}>
-      {gameWinner && (
-        <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-black text-center py-2 px-4 font-bold flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
-          <span>🏁 Juego terminado — Podio:</span>
-          {podium.length > 0
-            ? podium.map((p, i) => (
-                <span key={p.teamCode}>{(i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉")} {p.teamName}</span>
-              ))
-            : <span>🥇 {gameWinner}</span>}
-        </div>
-      )}
       {/* Header */}
       {!presentationMode && (
         <div className="sticky top-16 z-40 border-b border-border bg-background/95 backdrop-blur">
@@ -288,6 +316,17 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
                 </div>
               </div>
               <div className="flex items-center gap-4">
+                {gameWinner && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPodiumDialogOpen(true)}
+                    className="bg-gradient-to-r from-amber-500 to-yellow-400 text-black border-transparent hover:from-amber-400 hover:to-yellow-300"
+                  >
+                    <Flag className="mr-2 h-4 w-4" />
+                    Ver podio
+                  </Button>
+                )}
                 {/* View Mode Toggle */}
                 <div className="flex items-center gap-2">
                   <Button
@@ -382,8 +421,12 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
                   <div className="flex items-center gap-2">
                     <Clock className="h-5 w-5 text-blue-500" />
                     <div>
-                      <p className="text-sm text-muted-foreground">Tiempo Restante</p>
-                      <p className="text-2xl font-bold">{resComp?.resTime}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {gameWinner ? "Estado" : "Tiempo Restante"}
+                      </p>
+                      <p className="text-2xl font-bold">
+                        {gameWinner ? "Finalizado" : (resTimeLeft ?? resComp?.resTime)}
+                      </p>
                     </div>
                   </div>
                 </CardContent>
@@ -559,6 +602,40 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
           </Card>
         </div>
       )}
+
+      {/* Podium Modal */}
+      <Dialog open={podiumDialogOpen} onOpenChange={setPodiumDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="items-center text-center">
+            <DialogTitle className="flex items-center gap-2 text-2xl">
+              <Flag className="h-6 w-6 text-amber-500" />
+              ¡Juego terminado!
+            </DialogTitle>
+            <DialogDescription>Podio final de la competencia</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {podium.length > 0 ? (
+              podium.map((p, i) => (
+                <div
+                  key={p.teamCode}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl border px-4 py-3",
+                    i === 0 && "bg-gradient-to-r from-amber-500/20 to-yellow-400/10 border-amber-400/40"
+                  )}
+                >
+                  <span className="text-2xl shrink-0">{i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉"}</span>
+                  <span className="font-semibold flex-1 truncate">{p.teamName}</span>
+                </div>
+              ))
+            ) : (
+              <div className="flex items-center gap-3 rounded-xl border border-amber-400/40 bg-gradient-to-r from-amber-500/20 to-yellow-400/10 px-4 py-3">
+                <span className="text-2xl shrink-0">🥇</span>
+                <span className="font-semibold flex-1 truncate">{gameWinner}</span>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

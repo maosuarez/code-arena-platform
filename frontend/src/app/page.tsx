@@ -14,6 +14,7 @@ import { CompetitionDetailsModal } from "@/components/competition/competition-de
 import { toast } from "sonner"
 import { Competition } from "@/lib/types"
 import { useTeamCode } from "@/hooks/useTeamCode"
+import { useTeamSocket } from "@/hooks/useTeamSocket"
 import { useAuth } from "@/hooks/useAuth"
 import { apiRequest } from "@/lib/api"
 import Link from "next/link"
@@ -54,7 +55,8 @@ export default function HomePage() {
         body: {
           teamCode: teamCode,
           competitionId: compet.id
-        }
+        },
+        token: true
       })
       toast.info('Se te agrego a una Competencia')
       // Update local competition list so the card reflects "Ya estás inscrito" without a full reload
@@ -64,10 +66,26 @@ export default function HomePage() {
         )
       )
     } catch (error) {
-      console.error("Error al dejar el equipo:", error)
-      // Puedes mostrar un toast o alerta aquí si quieres
+      console.error("Error al unirse a la competencia:", error)
+      toast.error(error instanceof Error ? error.message : "Error al unirse a la competencia")
     }
   }
+
+  // Cuando cualquier miembro del equipo se inscribe a una competencia, el resto
+  // se entera al instante y ve "Ya estás inscrito" sin recargar ni arriesgarse
+  // a inscribirse dos veces sin querer.
+  useTeamSocket(teamCode, (msg) => {
+    if (msg.event === "team_joined_competition") {
+      const joinedCompetitionId = String(msg.data.competitionId)
+      setListCompetition(prev =>
+        prev.map(c =>
+          c.id === joinedCompetitionId && !(Array.isArray(c.teams) ? c.teams : []).includes(teamCode)
+            ? { ...c, teams: [...(Array.isArray(c.teams) ? c.teams : []), teamCode] }
+            : c
+        )
+      )
+    }
+  })
 
   const handleLeaveTeam = async () => {
     try {
@@ -283,7 +301,7 @@ export default function HomePage() {
           {/* Sample Competition */}
           {listCompetition.map((competition, index) => {
             const now = new Date()
-            const compDate = new Date(competition.date)
+            const compDate = new Date(competition.start_time ?? competition.date)
             const Icon = icons[index % icons.length] // Alternancia simple
 
             // Estado temporal
@@ -328,7 +346,7 @@ export default function HomePage() {
                 <CardContent className="relative z-10">
                   <div className="flex flex-wrap gap-2 mb-4">
                     <Badge variant="outline" className="border-yellow-200 text-yellow-700 dark:border-yellow-800 dark:text-yellow-300">
-                      👥 {competition.teams} equipos
+                      👥 {competition.teams.length} equipos
                     </Badge>
                     <Badge variant="outline" className="border-blue-200 text-blue-700 dark:border-blue-800 dark:text-blue-300">
                       🧩 {competition.problems.length} problemas

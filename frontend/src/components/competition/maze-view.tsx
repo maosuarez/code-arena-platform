@@ -46,9 +46,19 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, isUnlock
   const currentNodeId = myTeam?.currentNodeId ?? config.startNodeId
   const availablePoints = myTeam?.availablePoints ?? 0
 
+  // Doors have no direction: either endpoint counts as "reachable from here".
+  function touchesCurrentNode(door: MazeDoor) {
+    return door.from_node === currentNodeId || door.to_node === currentNodeId
+  }
+
+  // The node you'd land on if you cross this door from where you stand now.
+  function destinationNode(door: MazeDoor) {
+    return door.from_node === currentNodeId ? door.to_node : door.from_node
+  }
+
   // Doors reachable from my current position
   const reachableDoors = config.doors.filter(
-    d => d.from_node === currentNodeId && !myTeam?.unlockedDoors.includes(d.id)
+    d => touchesCurrentNode(d) && !myTeam?.unlockedDoors.includes(d.id)
   )
 
   // Determine door status from my team's perspective
@@ -58,7 +68,7 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, isUnlock
   // "unlocked"    = already opened by my team
   function doorStatus(door: MazeDoor): "unlocked" | "affordable" | "expensive" | "locked" {
     if (myTeam?.unlockedDoors.includes(door.id)) return "unlocked"
-    if (door.from_node !== currentNodeId) return "locked"
+    if (!touchesCurrentNode(door)) return "locked"
     if (door.cost <= availablePoints) return "affordable"
     return "expensive"
   }
@@ -281,7 +291,7 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, isUnlock
                 </p>
               ) : (
                 reachableDoors.map(door => {
-                  const toNode = config.nodes.find(n => n.id === door.to_node)
+                  const toNode = config.nodes.find(n => n.id === destinationNode(door))
                   const canAfford = door.cost <= availablePoints
                   const remainingAfter = availablePoints - door.cost
                   const isConfirming = confirmDoorId === door.id
@@ -301,7 +311,7 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, isUnlock
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-1.5 text-sm font-medium">
                           <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                          {toNode?.label ?? door.to_node}
+                          {toNode?.label ?? destinationNode(door)}
                           {door.label && (
                             <span className="text-xs text-muted-foreground font-normal">({door.label})</span>
                           )}

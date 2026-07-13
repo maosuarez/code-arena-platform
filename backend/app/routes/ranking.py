@@ -12,7 +12,22 @@ router = APIRouter()
 def format_seconds(seconds: int) -> str:
     return str(timedelta(seconds=seconds))
 
-def get_time_remaining(start_str: str, duration_minutes: int) -> str:
+def _resolve_end_time(start_time: datetime, duration_minutes: int, end_str: str | None) -> datetime:
+    # Prefer an explicit end_time (set via the admin edit dialog) over the
+    # computed start + duration — otherwise edits to end_time never show up
+    # here, since this endpoint used to ignore start_time/end_time entirely.
+    if end_str:
+        try:
+            end_time = end_str if isinstance(end_str, datetime) else datetime.fromisoformat(end_str)
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
+            return end_time
+        except (ValueError, TypeError):
+            pass
+    return start_time + timedelta(minutes=duration_minutes)
+
+
+def get_time_remaining(start_str: str, duration_minutes: int, end_str: str | None = None) -> str:
     try:
         # 🕒 Parsear la fecha de inicio (acepta datetime o string ISO)
         if isinstance(start_str, datetime):
@@ -27,7 +42,7 @@ def get_time_remaining(start_str: str, duration_minutes: int) -> str:
         start_time = start_time.replace(tzinfo=timezone.utc)
 
     # ⏱️ Calcular tiempo final
-    end_time = start_time + timedelta(minutes=duration_minutes)
+    end_time = _resolve_end_time(start_time, duration_minutes, end_str)
     now = datetime.now(timezone.utc)
 
     # 📉 Diferencia en segundos
@@ -42,6 +57,18 @@ def get_time_remaining(start_str: str, duration_minutes: int) -> str:
     seconds = remaining_seconds % 60
 
     return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
+def get_end_time_iso(start_str: str, duration_minutes: int, end_str: str | None = None) -> str | None:
+    try:
+        start_time = start_str if isinstance(start_str, datetime) else datetime.fromisoformat(start_str)
+    except (ValueError, TypeError):
+        return None
+
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
+
+    return _resolve_end_time(start_time, duration_minutes, end_str).isoformat()
 
 
 def generate_achievements() -> list[str]:
@@ -148,10 +175,18 @@ async def get_competition_ranking(competitionId: str):
         logger.exception("Error al obtener el ranking")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
+    raw_start = competition.get('start_time') or competition.get('date', '')
+    raw_end = competition.get('end_time')
+
     return {"ranking": rankings, 'competition': {
         'title': competition.get('title', ''),
         'teams': len(competition.get('teams', [])),
         'totalSolved': solved_problems,
-        'resTime': get_time_remaining(competition.get('date', ''), competition.get('duration', 0))
+        'resTime': get_time_remaining(raw_start, competition.get('duration', 0), raw_end),
+        'endTime': get_end_time_iso(raw_start, competition.get('duration', 0), raw_end),
+        'status': competition.get('status'),
+        'podium': competition.get('podium', []),
+        'winner': competition.get('winner'),
+        'winnerName': competition.get('winnerName'),
     }}
 

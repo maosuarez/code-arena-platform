@@ -34,6 +34,9 @@ const nextConfig: NextConfig = {
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              // blob: is required by the mqtt client's worker-based keepalive
+              // timer (used to avoid throttled setTimeout in background tabs).
+              "worker-src 'self' blob:",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https:",
               "font-src 'self'",

@@ -18,3 +18,5 @@ frontend/out/
 # Misc
 .DS_Store
 test/node_modules/
+# Playwright MCP debug artifacts
+.playwright-mcp/

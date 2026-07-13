@@ -118,16 +118,26 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
   const [activeTab, setActiveTab] = useState("problems")
   const [winner, setWinner] = useState<{ teamCode: string; teamName: string } | null>(null)
   const [podium, setPodium] = useState<{ teamCode: string; teamName: string }[]>([])
+  const [podiumDialogOpen, setPodiumDialogOpen] = useState(false)
+
+  function addSubmissionIfNew(sub: Submission) {
+    setSubmissions((prev) => {
+      const alreadyExists = prev.some(s => s.problem === sub.problem && s.member === sub.member)
+      if (alreadyExists) return prev
+      setTeamPoints((p) => p + sub.points)
+      return [...prev, sub]
+    })
+  }
 
   useCompetitionSocket(idCom, (msg) => {
     if (msg.event === "new_submission" && msg.data.teamCode === myTeamCode) {
       const sub = msg.data as unknown as Submission
-      setSubmissions((prev) => {
-        const alreadyExists = prev.some(s => s.problem === sub.problem && s.member === sub.member)
-        return alreadyExists ? prev : [...prev, sub]
-      })
-      setTeamPoints((prev) => prev + (msg.data.points as number))
+      addSubmissionIfNew(sub)
       toast.success(`¡${msg.data.member} resolvió un problema! +${msg.data.points} pts`)
+    }
+
+    if (msg.event === "cheer" && msg.data.teamCode === myTeamCode) {
+      toast(String(msg.data.message))
     }
 
     if (msg.event === "door_unlocked") {
@@ -169,6 +179,10 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
       }
     }
   })
+
+  useEffect(() => {
+    if (winner) setPodiumDialogOpen(true)
+  }, [winner])
 
   function computeTimerState(competition: Competition, now: Date = new Date()): { status: "not_started" | "active" | "ended"; secondsLeft: number } {
     // Prefer explicit start_time/end_time fields; fall back to date + duration
@@ -264,14 +278,14 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
 
   useEffect(() => {
     if (!competitionData.date) return
+    if (competitionData.status === "completed" || winner) return
     const timer = setInterval(() => {
       const ts = computeTimerState(competitionData)
       setTimerStatus(ts.status)
       setTimeLeft(ts.secondsLeft)
     }, 1000)
     return () => clearInterval(timer)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [competitionData])
+  }, [competitionData, winner])
 
   useEffect(() => {
     let filtered = problems
@@ -323,8 +337,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
           body: { source_code: sourceCode, language_id: languageId },
         }
       )
-      setSubmissions(prev => [...prev, response.submission])
-      setTeamPoints(prev => prev + response.submission.points)
+      addSubmissionIfNew(response.submission)
       setSubmitResult({ ok: true, msg: `¡AC! +${response.submission.points} puntos` })
       toast.success(`¡AC! +${response.submission.points} puntos`)
     } catch (error: unknown) {
@@ -373,35 +386,36 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
     return problems.find(p => p.id === id)?.title ?? id
   }
 
-  const cheereTeam = () => {
+  const cheereTeam = async () => {
     const phrases = [
       `🔥 ¡${teamName} va con toda!`,
       `🚀 ¡A romperla ${teamName}!`,
       `🏆 ¡Vamos ${teamName}, el podio los espera!`,
       `💪 ¡Código limpio, mente afilada: ${teamName}!`,
     ]
-    toast(phrases[Math.floor(Math.random() * phrases.length)])
+    const message = phrases[Math.floor(Math.random() * phrases.length)]
+    try {
+      // No mostramos el toast localmente: reaccionamos al mismo evento que le
+      // llega al resto del equipo por socket, así todos (incluido quien lo envía)
+      // ven exactamente el mismo mensaje al mismo tiempo.
+      await apiRequest(`/competition/${idCom}/cheer`, {
+        method: "POST",
+        token: true,
+        body: { message },
+      })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo enviar el ánimo")
+    }
   }
 
   const isSolved = (id: string) => submissions.some(s => s.problem === id)
 
-  const isUrgent = timerStatus === "active" && timeLeft !== null && timeLeft <= 300 // last 5 minutes
-  const isCritical = timerStatus === "active" && timeLeft !== null && timeLeft <= 60 // last 1 minute
+  const isGameOver = !!winner || competitionData.status === "completed"
+  const isUrgent = !isGameOver && timerStatus === "active" && timeLeft !== null && timeLeft <= 300 // last 5 minutes
+  const isCritical = !isGameOver && timerStatus === "active" && timeLeft !== null && timeLeft <= 60 // last 1 minute
 
   return (
     <div className="min-h-screen bg-background">
-      {winner && (
-        <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-black text-center py-2 px-4 font-semibold flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
-          <span className="flex items-center gap-2"><Flag className="h-4 w-4" /> Juego terminado — Podio:</span>
-          {podium.length > 0
-            ? podium.map((p, i) => (
-                <span key={p.teamCode} className={p.teamCode === myTeamCode ? "underline" : ""}>
-                  {(i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉")} {p.teamName}
-                </span>
-              ))
-            : <span>🥇 {winner.teamName}</span>}
-        </div>
-      )}
       {/* Status Bar */}
       <div className={`sticky top-16 z-40 border-b border-border backdrop-blur transition-colors duration-500 ${
         isCritical
@@ -434,18 +448,18 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                   ? "text-3xl text-red-300 animate-pulse"
                   : isUrgent
                   ? "text-3xl text-amber-300"
-                  : timerStatus === "ended"
+                  : isGameOver || timerStatus === "ended"
                   ? "text-2xl text-slate-400"
                   : timerStatus === "not_started"
                   ? "text-2xl text-yellow-400"
                   : "text-2xl text-foreground"
               }`}>
-                {timerStatus === "ended" ? "Finalizado" : timerStatus === "not_started" ? "No iniciado" : formatTime(timeLeft)}
+                {isGameOver || timerStatus === "ended" ? "Finalizado" : timerStatus === "not_started" ? "No iniciado" : formatTime(timeLeft)}
               </div>
               <p className={`text-[10px] uppercase tracking-widest mt-0.5 ${
                 isCritical ? "text-red-400" : isUrgent ? "text-amber-400" : "text-muted-foreground"
               }`}>
-                {isCritical ? "TIEMPO CRITICO" : isUrgent ? "CASI TERMINA" : timerStatus === "ended" ? "competencia terminada" : timerStatus === "not_started" ? "inicia en" : "tiempo restante"}
+                {isCritical ? "TIEMPO CRITICO" : isUrgent ? "CASI TERMINA" : isGameOver || timerStatus === "ended" ? "competencia terminada" : timerStatus === "not_started" ? "inicia en" : "tiempo restante"}
               </p>
             </div>
 
@@ -464,6 +478,17 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                   </span>
                 )}
               </div>
+              {winner && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPodiumDialogOpen(true)}
+                  className={`bg-gradient-to-r from-amber-500 to-yellow-400 text-black border-transparent hover:from-amber-400 hover:to-yellow-300 ${isCritical || isUrgent ? "" : ""}`}
+                >
+                  <Flag className="mr-1.5 h-3.5 w-3.5" />
+                  Ver podio
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -906,6 +931,42 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       )}
+
+      {/* Podium Modal */}
+      <Dialog open={podiumDialogOpen} onOpenChange={setPodiumDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="items-center text-center">
+            <DialogTitle className="flex items-center gap-2 text-2xl">
+              <Flag className="h-6 w-6 text-amber-500" />
+              ¡Juego terminado!
+            </DialogTitle>
+            <DialogDescription>Podio final de la competencia</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {podium.length > 0 ? (
+              podium.map((p, i) => (
+                <div
+                  key={p.teamCode}
+                  className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
+                    p.teamCode === myTeamCode ? "border-accent bg-accent/10" : "border-border"
+                  } ${i === 0 ? "bg-gradient-to-r from-amber-500/20 to-yellow-400/10" : ""}`}
+                >
+                  <span className="text-2xl shrink-0">{i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉"}</span>
+                  <span className="font-semibold flex-1 truncate">{p.teamName}</span>
+                  {p.teamCode === myTeamCode && (
+                    <Badge variant="outline" className="shrink-0">Tu equipo</Badge>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="flex items-center gap-3 rounded-xl border border-amber-400/40 bg-gradient-to-r from-amber-500/20 to-yellow-400/10 px-4 py-3">
+                <span className="text-2xl shrink-0">🥇</span>
+                <span className="font-semibold flex-1 truncate">{winner?.teamName}</span>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Rules Modal */}
       <Dialog open={rulesModalOpen} onOpenChange={setRulesModalOpen}>
