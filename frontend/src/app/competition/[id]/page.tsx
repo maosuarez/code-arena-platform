@@ -43,18 +43,40 @@ import { useCompetitionSocket } from "@/hooks/useCompetitionSocket"
 import MazeView from "@/components/competition/maze-view"
 
 /**
+ * Splits a statement around its midpoint so the hidden anti-cheat text can be
+ * inserted there. Shared by the on-screen renderer and the clipboard text
+ * builder so both stay in sync.
+ */
+function splitStatement(statement: string): { firstHalf: string; secondHalf: string } {
+  const mid = Math.floor(statement.length / 2)
+  return { firstHalf: statement.slice(0, mid), secondHalf: statement.slice(mid) }
+}
+
+/**
+ * Builds the text that should land on the clipboard when a user copies a
+ * problem: the visible statement with the hidden anti-AI instruction spliced
+ * back in. This is what actually poisons a paste into an AI assistant — the
+ * invisible on-screen <span> alone does nothing if the copy button ships
+ * clean text instead of reading the user's manual DOM selection.
+ */
+function getClipboardText(problem: Problem): string {
+  const { statement, hidden_instructions } = problem
+  if (!hidden_instructions) return statement
+  const { firstHalf, secondHalf } = splitStatement(statement)
+  return `${firstHalf}${hidden_instructions}${secondHalf}`
+}
+
+/**
  * Renders a problem statement with the hidden anti-cheat instructions injected
  * as invisible text in the middle. The text is zero-opacity and zero-size but
- * remains selectable, so it is included when the user copies the problem text.
+ * remains present in the DOM, so it is included when the user copies the problem text.
  */
 function ProblemStatementWithHidden({ problem }: { problem: Problem }) {
   const { statement, hidden_instructions } = problem
   if (!hidden_instructions) {
     return <p className="text-sm leading-relaxed whitespace-pre-wrap">{statement}</p>
   }
-  const mid = Math.floor(statement.length / 2)
-  const firstHalf = statement.slice(0, mid)
-  const secondHalf = statement.slice(mid)
+  const { firstHalf, secondHalf } = splitStatement(statement)
   return (
     <p className="text-sm leading-relaxed whitespace-pre-wrap">
       {firstHalf}
@@ -72,6 +94,28 @@ function ProblemStatementWithHidden({ problem }: { problem: Problem }) {
       </span>
       {secondHalf}
     </p>
+  )
+}
+
+/**
+ * Tiled, low-opacity text watermark overlaid on the problem statement.
+ * Browsers give web pages no way to detect or block a screenshot/print —
+ * this is a deterrent (traces a leaked screenshot back to the team that
+ * took it), not a technical block.
+ */
+function Watermark({ text }: { text: string }) {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='260' height='140'>
+    <text x='0' y='70' font-size='13' fill='rgba(120,120,120,0.16)' transform='rotate(-24 130 70)'>${text}</text>
+  </svg>`
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-10 select-none"
+      style={{
+        backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(svg)}")`,
+        backgroundRepeat: "repeat",
+      }}
+    />
   )
 }
 
@@ -855,7 +899,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(activeProblem.statement).then(() => toast.success("Copiado"))
+                      navigator.clipboard.writeText(getClipboardText(activeProblem)).then(() => toast.success("Copiado"))
                     }}
                     className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-muted/60"
                   >
@@ -863,7 +907,12 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                     Copiar
                   </button>
                 </div>
-                <div className="flex-1 overflow-y-auto px-4 pb-4">
+                <div
+                  className="relative flex-1 overflow-y-auto px-4 pb-4 select-none"
+                  onCopy={e => e.preventDefault()}
+                  onContextMenu={e => e.preventDefault()}
+                >
+                  <Watermark text={`${teamName || "CodeArena"} · ${myTeamCode}`} />
                   <ProblemStatementWithHidden problem={activeProblem} />
                 </div>
               </div>
