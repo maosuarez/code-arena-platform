@@ -573,7 +573,7 @@ problems:
                                   value={tc.input}
                                   onChange={e => updateTestCaseDraft(i, "input", e.target.value)}
                                   placeholder="stdin"
-                                  className="font-mono text-xs min-h-[60px]"
+                                  className="font-mono text-xs min-h-[90px]"
                                 />
                               </div>
                               <div className="flex gap-1">
@@ -583,7 +583,7 @@ problems:
                                     value={tc.expected}
                                     onChange={e => updateTestCaseDraft(i, "expected", e.target.value)}
                                     placeholder="stdout esperado"
-                                    className="font-mono text-xs min-h-[60px]"
+                                    className="font-mono text-xs min-h-[90px]"
                                   />
                                 </div>
                                 {draftTestCases.length > 1 && (
@@ -612,7 +612,7 @@ problems:
                   {problems.length > 0 && (
                     <div>
                       <h4 className="font-semibold mb-3">Problemas ({problems.length})</h4>
-                      <div className="max-h-96 overflow-y-auto pr-2">
+                      <div className="max-h-[32rem] overflow-y-auto pr-2">
                         <div className="space-y-3">
                           {problems.map(problem => (
                             <Card key={problem.id} className="p-0 overflow-hidden">
@@ -657,21 +657,27 @@ problems:
                                     </div>
                                     <div className="space-y-2">
                                       {problem.testCases.map((tc, i) => (
-                                        <div key={i} className="grid grid-cols-2 gap-2 items-start">
-                                          <Textarea
-                                            value={tc.input}
-                                            onChange={e => updateExistingTestCase(problem.id, i, "input", e.target.value)}
-                                            placeholder="stdin"
-                                            className="font-mono text-xs min-h-[50px]"
-                                          />
-                                          <div className="flex gap-1">
+                                        <div key={i} className="grid grid-cols-2 gap-3 items-start">
+                                          <div>
+                                            <p className="text-xs text-muted-foreground mb-1">Entrada {i + 1}</p>
                                             <Textarea
-                                              value={tc.expected}
-                                              onChange={e => updateExistingTestCase(problem.id, i, "expected", e.target.value)}
-                                              placeholder="stdout esperado"
-                                              className="font-mono text-xs min-h-[50px] flex-1"
+                                              value={tc.input}
+                                              onChange={e => updateExistingTestCase(problem.id, i, "input", e.target.value)}
+                                              placeholder="stdin"
+                                              className="font-mono text-xs min-h-[90px]"
                                             />
-                                            <Button variant="ghost" size="sm" onClick={() => removeExistingTestCase(problem.id, i)}>
+                                          </div>
+                                          <div className="flex gap-1">
+                                            <div className="flex-1">
+                                              <p className="text-xs text-muted-foreground mb-1">Salida esperada {i + 1}</p>
+                                              <Textarea
+                                                value={tc.expected}
+                                                onChange={e => updateExistingTestCase(problem.id, i, "expected", e.target.value)}
+                                                placeholder="stdout esperado"
+                                                className="font-mono text-xs min-h-[90px]"
+                                              />
+                                            </div>
+                                            <Button variant="ghost" size="sm" className="mt-5" onClick={() => removeExistingTestCase(problem.id, i)}>
                                               <Trash2 className="h-3 w-3" />
                                             </Button>
                                           </div>
