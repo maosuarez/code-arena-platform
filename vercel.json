@@ -13,22 +13,41 @@
                 "app/main.py": {
                     "maxDuration": 60
                 }
-            }
+            },
+            "routes": [
+                {
+                    "src": "/api/backend/(.*)",
+                    "transforms": [
+                        {
+                            "type": "request.path",
+                            "op": "set",
+                            "args": "/$1"
+                        }
+                    ]
+                },
+                {
+                    "src": "/api/backend",
+                    "transforms": [
+                        {
+                            "type": "request.path",
+                            "op": "set",
+                            "args": "/"
+                        }
+                    ]
+                }
+            ]
         }
     },
     "rewrites": [
         {
             "source": "/api/backend/:path*",
             "destination": {
-                "type": "service",
-                "service": "backend",
-                "path": "/:path*"
+                "service": "backend"
             }
         },
         {
             "source": "/(.*)",
             "destination": {
-                "type": "service",
                 "service": "frontend"
             }
         }
