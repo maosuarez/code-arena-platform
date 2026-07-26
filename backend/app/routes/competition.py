@@ -19,12 +19,6 @@ logger = logging.getLogger(__name__)
 MAX_SOURCE_CODE_BYTES = 65536  # 64 KB
 
 
-def _strip_hidden_instructions(competition: dict) -> dict:
-    """Remove hidden_instructions from all problems in a competition dict (in-place)."""
-    for problem in competition.get("problems", []):
-        problem.pop("hidden_instructions", None)
-    return competition
-
 router = APIRouter()
 
 @router.post("/create")
@@ -71,19 +65,18 @@ async def create_competition(req: RequestCompetition, _user: dict = Depends(requ
         logger.exception("Error al guardar la competición en la base de datos")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-    # Extraer y guardar casos de prueba en colección separada (nunca expuestos al cliente)
-    for orig_problem in req.problems:
+    # Extraer y guardar casos de prueba en colección separada (nunca expuestos al cliente).
+    # Empareja por posición: dict_req["problems"] y req.problems mantienen el mismo orden
+    # y dict_req ya tiene los ids definitivos asignados arriba (matching por title era
+    # ambiguo si dos problemas compartían título).
+    for orig_problem, stored_problem in zip(req.problems, dict_req.get("problems", [])):
         if orig_problem.testCases:
-            prob_id = next(
-                (p["id"] for p in comp_doc.get("problems", []) if p.get("title") == orig_problem.title),
-                None,
+            prob_id = stored_problem["id"]
+            await db["testcases"].replace_one(
+                {"problemId": prob_id},
+                {"problemId": prob_id, "cases": [tc.dict() for tc in orig_problem.testCases]},
+                upsert=True,
             )
-            if prob_id:
-                await db["testcases"].replace_one(
-                    {"problemId": prob_id},
-                    {"problemId": prob_id, "cases": [tc.dict() for tc in orig_problem.testCases]},
-                    upsert=True,
-                )
 
     return {
         "message": "Competición creada exitosamente",
@@ -115,7 +108,6 @@ async def get_all_competitions():
                     if "_id" in p:
                         p["id"] = str(p.pop("_id"))
 
-            _strip_hidden_instructions(comp)
             competitions.append(comp)
 
         return {"list": competitions}
@@ -229,7 +221,6 @@ async def get_competition_by_id(competitionId: str):
         except Exception:
             pass  # Si ya es datetime o falla la conversión, se deja como está
 
-    _strip_hidden_instructions(competition)
     return {"competition": competition}
 
 @router.get("/private/{competitionId}")
@@ -311,8 +302,9 @@ async def get_competition_private(
                 }
             }
 
-    # 📤 Respuesta final
-    _strip_hidden_instructions(competition)
+    # 📤 Respuesta final: hidden_instructions viaja intencionalmente al cliente —
+    # es el señuelo anti-copia (se inyecta invisible en el enunciado para
+    # envenenar silenciosamente cualquier copy-paste a un asistente de IA).
     return {
         "competition": competition,
         "team": team_data
