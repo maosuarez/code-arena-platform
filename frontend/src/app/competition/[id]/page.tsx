@@ -159,6 +159,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
   // Maze
   const [mazeState, setMazeState] = useState<MazeState | null>(null)
   const [isUnlocking, setIsUnlocking] = useState(false)
+  const [isMoving, setIsMoving] = useState(false)
   const [activeTab, setActiveTab] = useState("problems")
   const [winner, setWinner] = useState<{ teamCode: string; teamName: string } | null>(null)
   const [podium, setPodium] = useState<{ teamCode: string; teamName: string }[]>([])
@@ -192,6 +193,11 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
       } else {
         toast(`Equipo rival abrió una puerta.`)
       }
+    }
+
+    if (msg.event === "team_moved") {
+      // Alguien cruzó una puerta ya abierta (movimiento gratis, sin desbloqueo).
+      fetchMazeState()
     }
 
     if (msg.event === "team_finished") {
@@ -407,6 +413,25 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
       toast.error(msg)
     } finally {
       setIsUnlocking(false)
+    }
+  }
+
+  // Cruzar una puerta ya abierta: no cuesta puntos, sirve para volver a un nodo
+  // anterior y abrir desde ahí las salidas que quedaron pendientes.
+  async function handleMove(doorId: string) {
+    setIsMoving(true)
+    try {
+      await apiRequest(`/maze/${idCom}/move`, {
+        method: "POST",
+        token: true,
+        body: { door_id: doorId },
+      })
+      await fetchMazeState()
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Error al moverte"
+      toast.error(msg)
+    } finally {
+      setIsMoving(false)
     }
   }
 
@@ -692,7 +717,9 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                   mazeState={mazeState}
                   myTeamCode={myTeamCode}
                   onUnlockDoor={handleUnlockDoor}
+                  onMove={handleMove}
                   isUnlocking={isUnlocking}
+                  isMoving={isMoving}
                 />
               </TabsContent>
             </Tabs>
