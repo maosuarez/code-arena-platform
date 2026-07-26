@@ -238,6 +238,78 @@ async def _team_code_of(user: dict) -> str:
 class UnlockRequest(BaseModel):
     door_id: str
 
+
+class MoveRequest(BaseModel):
+    door_id: str
+
+
+@router.post("/{competitionId}/move")
+async def move_through_door(
+    competitionId: str,
+    req: MoveRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Retroceder/avanzar por una puerta YA abierta por el equipo. No cuesta
+    puntos: la puerta se pagó una sola vez, al abrirla. Sirve para volver a un
+    nodo anterior y abrir desde ahí las otras salidas que quedaron pendientes."""
+    competition = await _require_active_competition(competitionId)
+
+    config = await db["maze_configs"].find_one({"competitionId": competitionId})
+    if not config:
+        raise HTTPException(status_code=404, detail="Laberinto no encontrado")
+
+    door = next((d for d in config.get("doors", []) if d["id"] == req.door_id), None)
+    if not door:
+        raise HTTPException(status_code=404, detail="Puerta no encontrada")
+
+    team_code = await _team_code_of(user)
+
+    progress = await db["maze_progress"].find_one(
+        {"competitionId": competitionId, "teamCode": team_code}
+    )
+    current = progress.get("currentNodeId", config["startNodeId"]) if progress else config["startNodeId"]
+    unlocked = progress.get("unlockedDoors", []) if progress else []
+
+    if req.door_id not in unlocked:
+        raise HTTPException(status_code=400, detail="Esa puerta todavía no está abierta")
+    if current == door["from_node"]:
+        target_node = door["to_node"]
+    elif current == door["to_node"]:
+        target_node = door["from_node"]
+    else:
+        raise HTTPException(status_code=400, detail="Esa puerta no toca tu posición actual")
+
+    await db["maze_progress"].update_one(
+        {"competitionId": competitionId, "teamCode": team_code, "currentNodeId": current},
+        {"$set": {"currentNodeId": target_node}},
+    )
+
+    await manager.broadcast(competitionId, {
+        "event": "team_moved",
+        "data": {"teamCode": team_code, "doorId": req.door_id, "newNode": target_node},
+    })
+
+    # Una puerta abierta que toca la meta implica que el equipo ya pisó la meta al
+    # abrirla, así que este movimiento normalmente no gana nada. Lo verificamos
+    # igual para que un regreso a la meta no quede fuera del podio por un borde raro.
+    won, position, podium_complete = await _register_goal_arrival(
+        competitionId, competition, config, team_code, target_node
+    )
+
+    team = await db["teams"].find_one({"code": team_code}, {"_id": 0, "points": 1})
+    spent = progress.get("spentPoints", 0) if progress else 0
+    earned = team.get("points", 0) if team else 0
+
+    return {
+        "message": "Te moviste",
+        "newNode": target_node,
+        "availablePoints": earned - spent,
+        "reachedGoal": won,
+        "position": position,
+        "gameOver": podium_complete,
+    }
+
+
 @router.post("/{competitionId}/unlock")
 async def unlock_door(
     competitionId: str,
