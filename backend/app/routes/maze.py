@@ -21,22 +21,37 @@ async def create_or_update_maze(
     return {"message": "Laberinto configurado"}
 
 
+def _visited_nodes(config: dict, current_node_id: str, unlocked_doors: list[str]) -> set[str]:
+    """Nodos donde el equipo ya estuvo parado: la salida, su posición actual y
+    los extremos de toda puerta que abrió."""
+    unlocked = set(unlocked_doors)
+    visited = {config["startNodeId"], current_node_id}
+    for door in config.get("doors", []):
+        if door["id"] in unlocked:
+            visited.add(door["from_node"])
+            visited.add(door["to_node"])
+    return visited
+
+
 def _visible_ids(config: dict, current_node_id: str, unlocked_doors: list[str]) -> tuple[set[str], set[str]]:
-    """Fog-of-war: nodes/doors a team can see — their unlocked trail plus the
-    doors touching their current position (the jumps they could take next).
-    Anything else in the maze (including where the goal sits) stays hidden."""
+    """Fog-of-war: lo que un equipo ve es su territorio explorado (todos los nodos
+    visitados, no solo el actual) más la frontera: las puertas cerradas que tocan
+    cualquiera de esos nodos. Así, al avanzar de A a B, no pierde de vista las
+    opciones que dejó abiertas en A. El resto del laberinto (incluida la meta)
+    sigue oculto hasta explorarlo."""
     doors = config.get("doors", [])
     unlocked = set(unlocked_doors)
+    visited = _visited_nodes(config, current_node_id, unlocked_doors)
+
     visible_door_ids = set(unlocked)
-    visible_node_ids = {config["startNodeId"], current_node_id}
+    visible_node_ids = set(visited)
 
     for door in doors:
         if door["id"] in unlocked:
-            visible_node_ids.add(door["from_node"])
-            visible_node_ids.add(door["to_node"])
-
-    for door in doors:
-        if door["id"] not in unlocked and (door["from_node"] == current_node_id or door["to_node"] == current_node_id):
+            continue
+        if door["from_node"] in visited or door["to_node"] in visited:
+            # Puerta de frontera: se ve, y se ve a dónde lleva, pero el nodo del
+            # otro lado no cuenta como visitado (no expande la frontera).
             visible_door_ids.add(door["id"])
             visible_node_ids.add(door["from_node"])
             visible_node_ids.add(door["to_node"])
@@ -121,6 +136,105 @@ async def get_maze_state(competitionId: str, user: dict = Depends(get_current_us
     return {"config": config, "teams": teams}
 
 
+async def _require_active_competition(competitionId: str) -> dict:
+    competition = await db["competition"].find_one({"id": competitionId})
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competencia no encontrada")
+    status = competition.get("status")
+    if status != "active":
+        if status == "completed":
+            raise HTTPException(status_code=400, detail="El juego ya terminó: el podio (top 3) está completo")
+        raise HTTPException(status_code=400, detail=f"La competencia no está activa (estado: {status})")
+    return competition
+
+
+async def _register_goal_arrival(
+    competitionId: str,
+    competition: dict,
+    config: dict,
+    team_code: str,
+    target_node: str | None,
+) -> tuple[bool, int | None, bool]:
+    """🏁 El equipo pisó el nodo meta. El juego no termina con el primer equipo,
+    sino cuando se completa el PODIO (los primeros 3 en llegar).
+    Devuelve (llegó, posición_en_podio, podio_completo)."""
+    if target_node != config.get("goalNodeId"):
+        return False, None, False
+
+    # Cupos del podio: 3, o menos si hay menos equipos inscritos.
+    registered = len(competition.get("teams", []))
+    podium_target = min(3, registered) if registered else 3
+
+    finisher_team = await db["teams"].find_one({"code": team_code}, {"_id": 0, "teamName": 1})
+    finisher_name = finisher_team.get("teamName", team_code) if finisher_team else team_code
+
+    # Inserción atómica en el podio: solo si la competencia sigue activa,
+    # este equipo aún no está en el podio y queda cupo (< podium_target).
+    added = await db["competition"].update_one(
+        {
+            "id": competitionId,
+            "status": "active",
+            "podium.teamCode": {"$ne": team_code},
+            "$expr": {"$lt": [{"$size": {"$ifNull": ["$podium", []]}}, podium_target]},
+        },
+        {"$push": {"podium": {
+            "teamCode": team_code,
+            "teamName": finisher_name,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+        }}},
+    )
+
+    if added.modified_count != 1:
+        return True, None, False
+
+    comp_now = await db["competition"].find_one({"id": competitionId}, {"_id": 0, "podium": 1})
+    podium = comp_now.get("podium", []) if comp_now else []
+    position = len(podium)  # 1 = oro, 2 = plata, 3 = bronce
+
+    await manager.broadcast(competitionId, {
+        "event": "team_finished",
+        "data": {
+            "teamCode": team_code,
+            "teamName": finisher_name,
+            "position": position,
+            "podiumTarget": podium_target,
+        },
+    })
+
+    # Podio completo -> termina el juego para todos.
+    if position < podium_target:
+        return True, position, False
+
+    winner = podium[0]
+    await db["competition"].update_one(
+        {"id": competitionId, "status": "active"},
+        {"$set": {
+            "status": "completed",
+            "winner": winner.get("teamCode"),
+            "winnerName": winner.get("teamName"),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    await manager.broadcast(competitionId, {
+        "event": "game_over",
+        "data": {
+            "podium": podium,
+            "teamCode": winner.get("teamCode"),
+            "teamName": winner.get("teamName"),
+            "goalNodeId": config.get("goalNodeId"),
+        },
+    })
+    return True, position, True
+
+
+async def _team_code_of(user: dict) -> str:
+    user_data = await db["users"].find_one({"username": user.get("username")})
+    team_code = user_data.get("teamCode") if user_data else None
+    if not team_code:
+        raise HTTPException(status_code=400, detail="Usuario sin equipo asignado")
+    return team_code
+
+
 class UnlockRequest(BaseModel):
     door_id: str
 
@@ -134,14 +248,7 @@ async def unlock_door(
 
     # El laberinto solo se puede jugar mientras la competencia esté activa.
     # Esto bloquea movimientos una vez que un equipo ganó (status="completed").
-    competition = await db["competition"].find_one({"id": competitionId})
-    if not competition:
-        raise HTTPException(status_code=404, detail="Competencia no encontrada")
-    comp_status = competition.get("status")
-    if comp_status != "active":
-        if comp_status == "completed":
-            raise HTTPException(status_code=400, detail="El juego ya terminó: el podio (top 3) está completo")
-        raise HTTPException(status_code=400, detail=f"La competencia no está activa (estado: {comp_status})")
+    competition = await _require_active_competition(competitionId)
 
     config = await db["maze_configs"].find_one({"competitionId": competitionId})
     if not config:
@@ -151,10 +258,7 @@ async def unlock_door(
     if not door:
         raise HTTPException(status_code=404, detail="Puerta no encontrada")
 
-    user_data = await db["users"].find_one({"username": user.get("username")})
-    team_code = user_data.get("teamCode") if user_data else None
-    if not team_code:
-        raise HTTPException(status_code=400, detail="Usuario sin equipo asignado")
+    team_code = await _team_code_of(user)
 
     team = await db["teams"].find_one({"code": team_code})
     team_points = team.get("points", 0) if team else 0
@@ -232,76 +336,9 @@ async def unlock_door(
         },
     })
 
-    # 🏁 Condición de meta: el equipo llegó al nodo meta. El juego no termina con el
-    # primer equipo, sino cuando se completa el PODIO (los primeros 3 en llegar).
-    won = target_node == config.get("goalNodeId")
-    position = None
-    podium_complete = False
-    if won:
-        # Cupos del podio: 3, o menos si hay menos equipos inscritos.
-        registered = len(competition.get("teams", []))
-        podium_target = min(3, registered) if registered else 3
-
-        finisher_team = await db["teams"].find_one(
-            {"code": team_code}, {"_id": 0, "teamName": 1}
-        )
-        finisher_name = finisher_team.get("teamName", team_code) if finisher_team else team_code
-
-        # Inserción atómica en el podio: solo si la competencia sigue activa,
-        # este equipo aún no está en el podio y queda cupo (< podium_target).
-        added = await db["competition"].update_one(
-            {
-                "id": competitionId,
-                "status": "active",
-                "podium.teamCode": {"$ne": team_code},
-                "$expr": {"$lt": [{"$size": {"$ifNull": ["$podium", []]}}, podium_target]},
-            },
-            {"$push": {"podium": {
-                "teamCode": team_code,
-                "teamName": finisher_name,
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-            }}},
-        )
-
-        if added.modified_count == 1:
-            comp_now = await db["competition"].find_one(
-                {"id": competitionId}, {"_id": 0, "podium": 1}
-            )
-            podium = comp_now.get("podium", []) if comp_now else []
-            position = len(podium)  # 1 = oro, 2 = plata, 3 = bronce
-
-            await manager.broadcast(competitionId, {
-                "event": "team_finished",
-                "data": {
-                    "teamCode": team_code,
-                    "teamName": finisher_name,
-                    "position": position,
-                    "podiumTarget": podium_target,
-                },
-            })
-
-            # Podio completo -> termina el juego para todos.
-            if position >= podium_target:
-                podium_complete = True
-                winner = podium[0]
-                await db["competition"].update_one(
-                    {"id": competitionId, "status": "active"},
-                    {"$set": {
-                        "status": "completed",
-                        "winner": winner.get("teamCode"),
-                        "winnerName": winner.get("teamName"),
-                        "completed_at": datetime.now(timezone.utc).isoformat(),
-                    }},
-                )
-                await manager.broadcast(competitionId, {
-                    "event": "game_over",
-                    "data": {
-                        "podium": podium,
-                        "teamCode": winner.get("teamCode"),
-                        "teamName": winner.get("teamName"),
-                        "goalNodeId": config.get("goalNodeId"),
-                    },
-                })
+    won, position, podium_complete = await _register_goal_arrival(
+        competitionId, competition, config, team_code, target_node
+    )
 
     progress = await db["maze_progress"].find_one(
         {"competitionId": competitionId, "teamCode": team_code}, {"_id": 0}
