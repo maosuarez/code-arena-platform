@@ -52,8 +52,23 @@ async def seed_admin():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await ensure_indexes()
-    await seed_admin()
+    # En serverless el arranque corre en cada cold start, y una excepción aquí
+    # no falla una petición: mata la función entera y deja el backend completo
+    # devolviendo FUNCTION_INVOCATION_FAILED. La preparación de la base se hace
+    # fuera del proceso, con backend/scripts/bootstrap_db.py.
+    if os.getenv("VERCEL"):
+        logger.info("Entorno Vercel: se omite la preparación de la base en el arranque.")
+        yield
+        return
+
+    try:
+        await ensure_indexes()
+        await seed_admin()
+    except Exception:
+        logger.exception(
+            "Falló la preparación de la base en el arranque. El backend sigue "
+            "levantado; ejecuta scripts/bootstrap_db.py para dejarla lista."
+        )
     yield
 
 app = FastAPI(title="Competencias Universitarias - Backend", lifespan=lifespan)
