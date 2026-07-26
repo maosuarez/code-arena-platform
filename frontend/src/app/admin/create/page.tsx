@@ -231,8 +231,21 @@ problems:
     title: "Suma de dos números"
     description: |
       Dado un arreglo de enteros \`nums\` y un entero objetivo \`target\`,
-      retorna los índices de los dos números que suman \`target\`.
-      Puedes asumir que existe exactamente una solución.
+      retorna los índices (0-based) de los dos números distintos cuya suma
+      sea exactamente \`target\`. Puedes asumir que existe una única solución.
+
+      Formato de entrada:
+        Línea 1: n (tamaño del arreglo)
+        Línea 2: n enteros separados por espacio — el arreglo \`nums\`
+        Línea 3: el entero \`target\`
+
+      Formato de salida:
+        Los dos índices separados por espacio, en cualquier orden.
+
+      Restricciones:
+        2 <= n <= 10^4
+        -10^9 <= nums[i] <= 10^9
+        -10^9 <= target <= 10^9
     difficulty: easy
     hints:
       - "Usa un diccionario para guardar complementos."
@@ -249,6 +262,16 @@ problems:
     description: |
       Dada una cadena \`s\` que contiene palabras separadas por espacios,
       retorna la cadena con las palabras en orden inverso.
+
+      Formato de entrada:
+        Línea 1: la cadena \`s\` (una sola línea, sin saltos internos)
+
+      Formato de salida:
+        La cadena con las palabras en orden inverso, separadas por un espacio.
+
+      Restricciones:
+        1 <= longitud(s) <= 10^4
+        \`s\` contiene solo letras minúsculas y espacios simples entre palabras.
     difficulty: medium
     hints:
       - "Separa las palabras y revierte la lista."
@@ -521,7 +544,7 @@ problems:
                         <Textarea
                           value={newProblemStatement}
                           onChange={e => setNewProblemStatement(e.target.value)}
-                          placeholder="Escribe aquí el enunciado completo. Puedes incluir ejemplos, restricciones, etc."
+                          placeholder={'Escribe aquí el enunciado completo. Incluye siempre:\n- Formato de entrada (indica el tamaño del arreglo antes del arreglo, ej. "Línea 1: n, Línea 2: n enteros")\n- Formato de salida\n- Restricciones/límites (rangos de n y de los valores)'}
                           className="min-h-[120px] font-mono text-sm"
                         />
                       </div>

@@ -1,3 +1,4 @@
+import base64
 import os
 import httpx
 from typing import List
@@ -57,20 +58,34 @@ async def judge_submission(
     if JUDGE0_API_KEY:
         headers["X-Auth-Token"] = JUDGE0_API_KEY
 
+    def _b64(text: str) -> str:
+        return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+    def _unb64(text: str | None) -> str:
+        if not text:
+            return ""
+        return base64.b64decode(text).decode("utf-8", errors="replace")
+
+    source_b64 = _b64(source_code)
+
     async with httpx.AsyncClient() as client:
         for i, case in enumerate(test_cases):
+            # base64_encoded=true: compiler diagnostics (e.g. GCC's Unicode
+            # smart quotes around identifiers) break Judge0's plain-text mode,
+            # which silently drops the real error and returns an opaque
+            # "cannot be converted to UTF-8" response instead.
             payload = {
-                "source_code": source_code,
+                "source_code": source_b64,
                 "language_id": language_id,
-                "stdin": case.get("input", ""),
-                "expected_output": case.get("expected", ""),
+                "stdin": _b64(case.get("input", "")),
+                "expected_output": _b64(case.get("expected", "")),
                 "cpu_time_limit": time_limit,
                 "memory_limit": memory_limit * 1024,  # Judge0 expects KB
             }
             try:
                 resp = await client.post(
                     f"{JUDGE0_API_URL}/submissions",
-                    params={"base64_encoded": "false", "wait": "true"},
+                    params={"base64_encoded": "true", "wait": "true"},
                     json=payload,
                     headers=headers,
                     timeout=30.0,
@@ -81,7 +96,12 @@ async def judge_submission(
                 # 3 = Accepted
                 if status_id != 3:
                     desc = result.get("status", {}).get("description", "Error desconocido")
-                    stderr = result.get("stderr") or result.get("compile_output") or ""
+                    # 6 = Compilation Error — one failure for the whole submission,
+                    # not tied to a specific test case, so don't label it "Caso N".
+                    if status_id == 6:
+                        compile_output = _unb64(result.get("compile_output"))
+                        return False, f"Error de compilación:\n{compile_output[:2000]}"
+                    stderr = _unb64(result.get("stderr")) or _unb64(result.get("compile_output"))
                     return False, f"Caso {i + 1}: {desc}. {stderr[:300]}"
             except httpx.HTTPError as e:
                 return False, f"Error al conectar con el juez: {str(e)}"

@@ -970,6 +970,17 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                     placeholder={`# Escribe tu solución en ${LANGUAGE_NAMES[languageId] ?? "el lenguaje seleccionado"}\n`}
                     value={sourceCode}
                     onChange={e => setSourceCode(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key !== "Tab") return
+                      e.preventDefault()
+                      const target = e.currentTarget
+                      const { selectionStart, selectionEnd } = target
+                      const next = sourceCode.slice(0, selectionStart) + "\t" + sourceCode.slice(selectionEnd)
+                      setSourceCode(next)
+                      requestAnimationFrame(() => {
+                        target.selectionStart = target.selectionEnd = selectionStart + 1
+                      })
+                    }}
                     spellCheck={false}
                     autoFocus
                   />
