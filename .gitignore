@@ -9,6 +9,8 @@ venv/
 # Env
 backend/.env
 .env
+.env.*
+!.env.example
 
 # Node
 frontend/node_modules/

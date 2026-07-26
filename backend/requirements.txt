@@ -3,6 +3,7 @@ uvicorn[standard]==0.35.0
 gunicorn
 motor==3.7.1
 pymongo==4.14.1
+dnspython==2.7.0   # requerido por las URIs mongodb+srv:// de Atlas
 python-jose==3.5.0
 passlib[bcrypt]==1.7.4
 bcrypt>=3.2.0,<4.0.0
