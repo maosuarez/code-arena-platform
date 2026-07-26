@@ -21,8 +21,59 @@ async def create_or_update_maze(
     return {"message": "Laberinto configurado"}
 
 
+def _visible_ids(config: dict, current_node_id: str, unlocked_doors: list[str]) -> tuple[set[str], set[str]]:
+    """Fog-of-war: nodes/doors a team can see — their unlocked trail plus the
+    doors touching their current position (the jumps they could take next).
+    Anything else in the maze (including where the goal sits) stays hidden."""
+    doors = config.get("doors", [])
+    unlocked = set(unlocked_doors)
+    visible_door_ids = set(unlocked)
+    visible_node_ids = {config["startNodeId"], current_node_id}
+
+    for door in doors:
+        if door["id"] in unlocked:
+            visible_node_ids.add(door["from_node"])
+            visible_node_ids.add(door["to_node"])
+
+    for door in doors:
+        if door["id"] not in unlocked and (door["from_node"] == current_node_id or door["to_node"] == current_node_id):
+            visible_door_ids.add(door["id"])
+            visible_node_ids.add(door["from_node"])
+            visible_node_ids.add(door["to_node"])
+
+    return visible_node_ids, visible_door_ids
+
+
+def _apply_fog_of_war(config: dict, teams: list[dict], my_team_code: str | None) -> tuple[dict, list[dict]]:
+    my_team = next((t for t in teams if t["teamCode"] == my_team_code), None)
+    current_node_id = my_team["currentNodeId"] if my_team else config["startNodeId"]
+    unlocked_doors = my_team["unlockedDoors"] if my_team else []
+
+    visible_node_ids, visible_door_ids = _visible_ids(config, current_node_id, unlocked_doors)
+
+    fogged_config = {
+        **config,
+        "nodes": [n for n in config.get("nodes", []) if n["id"] in visible_node_ids],
+        "doors": [d for d in config.get("doors", []) if d["id"] in visible_door_ids],
+        "goalNodeId": config.get("goalNodeId") if config.get("goalNodeId") in visible_node_ids else "",
+    }
+
+    fogged_teams = []
+    for t in teams:
+        if t["teamCode"] == my_team_code:
+            fogged_teams.append(t)
+            continue
+        fogged_teams.append({
+            **t,
+            "currentNodeId": t["currentNodeId"] if t["currentNodeId"] in visible_node_ids else None,
+            "unlockedDoors": [d for d in t["unlockedDoors"] if d in visible_door_ids],
+        })
+
+    return fogged_config, fogged_teams
+
+
 @router.get("/{competitionId}/state")
-async def get_maze_state(competitionId: str):
+async def get_maze_state(competitionId: str, user: dict = Depends(get_current_user)):
     config = await db["maze_configs"].find_one({"competitionId": competitionId}, {"_id": 0})
     if not config:
         raise HTTPException(status_code=404, detail="Laberinto no configurado para esta competencia")
@@ -61,6 +112,11 @@ async def get_maze_state(competitionId: str):
             "earnedPoints": earned,
             "availablePoints": earned - spent,
         })
+
+    if config.get("fogOfWar") and not user.get("is_admin", False):
+        user_data = await db["users"].find_one({"username": user.get("username")})
+        my_team_code = user_data.get("teamCode") if user_data else None
+        config, teams = _apply_fog_of_war(config, teams, my_team_code)
 
     return {"config": config, "teams": teams}
 

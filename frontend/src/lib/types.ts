@@ -98,13 +98,14 @@ export interface MazeConfig {
   doors: MazeDoor[]
   startNodeId: string
   goalNodeId: string
+  fogOfWar: boolean
 }
 
 export interface TeamMazeState {
   teamCode: string
   teamName: string
   avatar: string
-  currentNodeId: string
+  currentNodeId: string | null
   unlockedDoors: string[]
   spentPoints: number
   earnedPoints: number

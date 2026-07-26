@@ -255,7 +255,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
 
   const fetchMazeState = useCallback(async () => {
     try {
-      const res = await apiRequest(`/maze/${idCom}/state`, { method: "GET" })
+      const res = await apiRequest(`/maze/${idCom}/state`, { method: "GET", token: true })
       setMazeState(res as MazeState)
     } catch {
       // Maze not configured yet — silently ignore

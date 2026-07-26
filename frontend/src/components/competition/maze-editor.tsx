@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
 import { apiRequest } from "@/lib/api"
 import { MazeNode, MazeDoor } from "@/lib/types"
@@ -31,6 +32,7 @@ export default function MazeEditor({ competitionId, onSaved }: MazeEditorProps) 
   const [doors, setDoors] = useState<MazeDoor[]>([])
   const [startNodeId, setStartNodeId] = useState<string | null>(null)
   const [goalNodeId, setGoalNodeId] = useState<string | null>(null)
+  const [fogOfWar, setFogOfWar] = useState(false)
   const [mode, setMode] = useState<Mode>("node")
   const [selected, setSelected] = useState<{ type: "node" | "door"; id: string } | null>(null)
   const [doorFirstNode, setDoorFirstNode] = useState<string | null>(null)
@@ -44,13 +46,14 @@ export default function MazeEditor({ competitionId, onSaved }: MazeEditorProps) 
   useEffect(() => {
     async function loadMaze() {
       try {
-        const res = await apiRequest(`/maze/${competitionId}/state`, { method: "GET" })
+        const res = await apiRequest(`/maze/${competitionId}/state`, { method: "GET", token: true })
         const config = res?.config
         if (config) {
           if (Array.isArray(config.nodes)) setNodes(config.nodes)
           if (Array.isArray(config.doors)) setDoors(config.doors)
           if (config.startNodeId) setStartNodeId(config.startNodeId)
           if (config.goalNodeId) setGoalNodeId(config.goalNodeId)
+          setFogOfWar(Boolean(config.fogOfWar))
         }
       } catch {
         // No maze configured yet — start with blank canvas
@@ -187,7 +190,7 @@ export default function MazeEditor({ competitionId, onSaved }: MazeEditorProps) 
       await apiRequest(`/maze/${competitionId}`, {
         method: "POST",
         token: true,
-        body: { nodes, doors, startNodeId, goalNodeId, competitionId },
+        body: { nodes, doors, startNodeId, goalNodeId, fogOfWar, competitionId },
       })
       toast.success("Laberinto guardado")
       onSaved?.()
@@ -223,6 +226,10 @@ export default function MazeEditor({ competitionId, onSaved }: MazeEditorProps) 
             <span className="ml-1.5 hidden sm:inline">{label}</span>
           </Button>
         ))}
+        <label className="flex items-center gap-2 text-xs text-muted-foreground ml-2">
+          <Switch checked={fogOfWar} onCheckedChange={setFogOfWar} />
+          Modo niebla (fog of war)
+        </label>
         <div className="ml-auto flex gap-2">
           <Button
             size="sm"
@@ -471,6 +478,7 @@ export default function MazeEditor({ competitionId, onSaved }: MazeEditorProps) 
         <span>{doors.length} puertas</span>
         {startNodeId && <Badge variant="outline" className="text-xs py-0 text-green-600">🚀 Inicio: {nodeLabel(startNodeId)}</Badge>}
         {goalNodeId && <Badge variant="outline" className="text-xs py-0 text-yellow-600">🏆 Meta: {nodeLabel(goalNodeId)}</Badge>}
+        {fogOfWar && <Badge variant="outline" className="text-xs py-0 text-indigo-600">🌫️ Niebla activa</Badge>}
       </div>
     </div>
   )

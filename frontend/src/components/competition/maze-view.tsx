@@ -97,6 +97,13 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, isUnlock
   return (
     <div className="space-y-4">
 
+      {config.fogOfWar && (
+        <div className="flex items-center gap-2 text-xs rounded-lg border border-indigo-300 bg-indigo-500/10 text-indigo-700 px-3 py-2">
+          <span>🌫️</span>
+          <span>Modo niebla: solo ves los nodos y puertas a tu alcance desde tu posición actual. El resto del laberinto (y la meta) permanece oculto hasta que lo explores.</span>
+        </div>
+      )}
+
       {/* Team legend + door status key */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-3">
@@ -396,7 +403,7 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, isUnlock
                   {[...teams]
                     .sort((a, b) => b.unlockedDoors.length - a.unlockedDoors.length)
                     .map((t, rank) => {
-                      const node = config.nodes.find(n => n.id === t.currentNodeId)
+                      const node = t.currentNodeId ? config.nodes.find(n => n.id === t.currentNodeId) : null
                       const isMe = t.teamCode === myTeamCode
                       return (
                         <div
@@ -409,7 +416,7 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, isUnlock
                             <span>{t.avatar} {t.teamName}</span>
                           </div>
                           <div className="flex items-center gap-2 text-muted-foreground">
-                            <span>{node?.label ?? t.currentNodeId}</span>
+                            <span>{node?.label ?? (t.currentNodeId ?? "❔ Desconocida")}</span>
                             <span className="flex items-center gap-0.5">
                               <Lock className="h-2.5 w-2.5" />{t.unlockedDoors.length}
                             </span>

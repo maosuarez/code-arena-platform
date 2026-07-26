@@ -20,3 +20,4 @@ class MazeConfig(BaseModel):
     doors: List[MazeDoor]
     startNodeId: str
     goalNodeId: str
+    fogOfWar: bool = False
