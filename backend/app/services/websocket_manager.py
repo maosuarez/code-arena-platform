@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 import ssl
 import aiomqtt
+
+logger = logging.getLogger(__name__)
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_WS_PORT = int(os.getenv("MQTT_WS_PORT", "443"))
@@ -28,9 +31,12 @@ class MQTTManager:
                 password=MQTT_PASSWORD,
             ) as client:
                 await client.publish(topic, json.dumps(message), qos=1)
+            logger.info("MQTT publicado en %s", topic)
         except Exception:
-            # No bloquear la petición HTTP si MQTT no está disponible
-            pass
+            # No bloquear la petición HTTP si MQTT no está disponible, pero
+            # dejar rastro: sin esto un fallo de credenciales es invisible —
+            # el navegador conecta, no llega nada y no hay nada que mirar.
+            logger.exception("Fallo publicando en MQTT (topic=%s)", topic)
 
     async def broadcast(self, competition_id: str, message: dict):
         await self._publish(f"{MQTT_TOPIC_PREFIX}/ranking/{competition_id}", message)
