@@ -336,17 +336,187 @@ docker run -d \
 
 **En producción (opciones)**:
 
-1. **MongoDB Atlas** (cloud gratuito hasta 5GB):
-   - Crea un cluster en https://www.mongodb.com/cloud/atlas
-   - Obtén la cadena de conexión: `mongodb+srv://user:pass@cluster.mongodb.net/dbname`
-   - Establece `MONGO_URL` a esa cadena.
+#### Opción 1 (recomendada): MongoDB Atlas M0 — gratis, sin tarjeta
 
-2. **Azure Cosmos DB** (API MongoDB):
-   - En Azure Portal, crea un Cosmos DB con API MongoDB.
-   - Copia la cadena de conexión primaria.
-   - Establece `MONGO_URL`.
+El tier **M0** es gratuito de forma indefinida: 512 MB de almacenamiento, cluster
+compartido, sin costo y sin tarjeta de crédito. Suficiente de sobra para Code Arena
+(usuarios, equipos, competencias y submissions son documentos pequeños).
 
-3. **Servidor propio** con MongoDB instalado.
+1. **Crea la cuenta y el cluster**
+
+   - Regístrate en https://www.mongodb.com/cloud/atlas/register
+   - *Create a deployment* → elige **M0 Free**.
+   - Provider/región: la más cercana a donde corre el backend (menos latencia por query).
+   - Nombre del cluster: `code-arena` (o el que prefieras).
+
+2. **Crea el usuario de base de datos**
+
+   *Database Access* → *Add New Database User*:
+   - Auth method: **Password**.
+   - Rol: `Read and write to any database` (o `readWrite` solo sobre `code_arena`).
+   - Genera un password largo y guárdalo: aparece una sola vez.
+
+   > Si el password lleva caracteres especiales (`@ : / ? # [ ] %`), hay que
+   > URL-encodearlos dentro de la URI. Lo más simple es usar un password
+   > alfanumérico generado por Atlas.
+
+3. **Autoriza el acceso de red**
+
+   *Network Access* → *Add IP Address*:
+   - Si el backend tiene IP fija (VPS, App Service con outbound IP conocida): añade esa IP.
+   - Si corre en plataformas con IP dinámica (Vercel, Azure App Service en plan
+     compartido, contenedores efímeros): `0.0.0.0/0`. La seguridad recae entonces
+     en el usuario/password y en TLS, que Atlas exige siempre.
+
+4. **Copia la cadena de conexión**
+
+   *Database* → *Connect* → *Drivers* → Python. Obtienes algo como:
+
+   ```
+   mongodb+srv://code-arena:<password>@code-arena.ab1cd.mongodb.net/?retryWrites=true&w=majority&appName=code-arena
+   ```
+
+   Sustituye `<password>` por el real y configúralo:
+
+   ```
+   MONGO_URL=mongodb+srv://code-arena:TU_PASSWORD@code-arena.ab1cd.mongodb.net/?retryWrites=true&w=majority
+   MONGO_DB=code_arena
+   ```
+
+   El nombre de la base de datos lo toma el backend de `MONGO_DB`, no de la URI:
+   no hace falta añadir el path a la cadena.
+
+5. **Verifica la conexión** (con el venv del backend activo)
+
+   ```bash
+   python - <<'PY'
+   import asyncio, os
+   from dotenv import load_dotenv
+   from motor.motor_asyncio import AsyncIOMotorClient
+
+   load_dotenv()
+   async def main():
+       c = AsyncIOMotorClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=10000)
+       print(await c.admin.command("ping"))
+       print("colecciones:", await c[os.environ["MONGO_DB"]].list_collection_names())
+   asyncio.run(main())
+   PY
+   ```
+
+   Debe imprimir `{'ok': 1.0}`. Si falla con `ServerSelectionTimeoutError`, casi
+   siempre es *Network Access* (paso 3) o el password mal escrito.
+
+6. **Prepara la base vacía**
+
+   Un cluster nuevo no tiene ni colecciones ni base de datos: es normal y correcto.
+   MongoDB las crea en la primera escritura. Lo que sí hace falta es que existan
+   los **índices** y la **cuenta de admin** — sin admin, con la base vacía, no hay
+   forma de entrar a crear competencias.
+
+   El backend hace ambas cosas solo, en el `lifespan` de arranque
+   (`ensure_indexes()` + `seed_admin()` en `app/main.py`). **Pero en Vercel los
+   eventos de lifespan de ASGI no siempre se ejecutan**, así que no dependas de eso:
+
+   ```bash
+   cd backend
+   python scripts/bootstrap_db.py
+   ```
+
+   Lo corres una vez desde tu máquina, con el `.env` apuntando a Atlas. Es
+   idempotente. Imprime los índices creados y confirma el admin.
+
+   Requiere `ADMIN_INITIAL_PASSWORD` definida; el usuario queda como
+   `admin` / `admin@codearena.local`. Cambia esa contraseña después del primer login.
+
+**Notas del tier M0**:
+- Sin backups automáticos. Para respaldar: `mongodump --uri="$MONGO_URL"`.
+- El cluster se pausa tras ~60 días de inactividad total; se reactiva desde el panel.
+- Requiere `dnspython` (ya está en `requirements.txt`) para resolver `mongodb+srv://`.
+- Máximo 500 conexiones. El backend limita el pool con `MONGO_MAX_POOL_SIZE` (default 5,
+  dimensionado para Vercel: cada instancia serverless mantiene su propio pool, así que
+  5 × ~80 instancias concurrentes = 400 conexiones, con margen). En un backend de
+  proceso único (docker-compose, VPS) súbelo a 20-50.
+- CPU y IOPS son **compartidos y con throttling**. Es el límite real del tier, no el
+  almacenamiento. Ver "Preparar el día de la competencia" más abajo.
+
+**Migrar los datos locales a Atlas** (si ya tienes una BD de desarrollo):
+
+```bash
+mongodump --uri="mongodb://localhost:27017" --db=code_arena --out=/tmp/dump
+mongorestore --uri="mongodb+srv://user:pass@cluster.mongodb.net" \
+  --nsFrom='code_arena.*' --nsTo='code_arena.*' /tmp/dump
+```
+
+#### Preparar el día de la competencia
+
+En M0 el cuello de botella **no es el almacenamiento** (512 MB sobran: los documentos
+son pequeños), sino la **CPU compartida con throttling**. Bajo carga en vivo, lo que
+tumba el cluster son las queries sin índice, no el volumen de datos.
+
+**1. Índices — automáticos, pero verifícalos**
+
+`ensure_indexes()` (en `backend/app/database.py`) los crea al arrancar:
+
+| Colección | Índice | Único | Por qué |
+|-----------|--------|-------|---------|
+| `competition` | `id` | sí | La lectura más frecuente del sistema |
+| `teams` | `code` | sí | Lookup de equipo en cada submission |
+| `users` | `email`, `username` | sí | Login y registro |
+| `users` | `teamCode` | no | Listar miembros del equipo |
+| `testcases` | `problemId` | sí | Validación de código |
+| `maze_configs` | `competitionId` | sí | Carga del laberinto |
+| `maze_progress` | `competitionId + teamCode` | sí | Upsert de avance (previene duplicados en carreras) |
+
+Comprueba en Atlas → *Database* → *Browse Collections* → pestaña *Indexes*, o:
+
+```bash
+mongosh "$MONGO_URL" --eval 'db.getSiblingDB("code_arena").competition.getIndexes()'
+```
+
+Si `ensure_indexes()` registra un `ERROR` al arrancar, es que hay documentos
+duplicados preexistentes: límpialos antes del evento (el arranque no se aborta).
+
+**2. Ensaya con carga real**
+
+```bash
+python scripts/e2e_playtest.py    # flujo completo contra el backend
+```
+
+Córrelo apuntando a Atlas, no a Mongo local: lo que quieres medir es la latencia
+de red + el throttling del tier compartido. Vigila en Atlas → *Metrics* las gráficas
+de *Opcounters* y *Connections* mientras corre.
+
+**3. Escala el día del evento y vuelve a bajar**
+
+Es la palanca decisiva si esperas decenas de equipos concurrentes. Desde el panel
+de Atlas puedes subir el cluster a un tier dedicado (M10) y devolverlo a M0 al
+terminar; se cobra por hora, así que un día de competencia cuesta un par de dólares.
+Un tier dedicado te da CPU sin throttling y backups automáticos. Verifica los precios
+vigentes en https://www.mongodb.com/pricing antes de decidir.
+
+Hazlo **el día anterior**, no durante el evento: el cambio de tier implica una
+conmutación con reconexión de los clientes.
+
+**4. Respalda antes de empezar**
+
+M0 no tiene backups automáticos:
+
+```bash
+mongodump --uri="$MONGO_URL" --db=code_arena --out=backup-$(date +%F)
+```
+
+**5. Alertas**
+
+En Atlas → *Alerts*, activa avisos de conexiones por encima del 80% y de CPU alta.
+Te enteras antes de que los equipos vean errores.
+
+#### Opción 2: Azure Cosmos DB (API MongoDB)
+
+- En Azure Portal, crea un Cosmos DB con API MongoDB.
+- Copia la cadena de conexión primaria.
+- Establece `MONGO_URL`.
+
+#### Opción 3: Servidor propio con MongoDB instalado
 
 **Verificar conexión**:
 
