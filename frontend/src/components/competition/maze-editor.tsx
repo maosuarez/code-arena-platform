@@ -25,9 +25,16 @@ type Mode = "node" | "door" | "move" | "delete"
 interface MazeEditorProps {
   competitionId: string
   onSaved?: () => void
+  /** Suma de puntos obtenibles resolviendo todos los retos de la competencia
+   * (scoring × cantidad de problemas por dificultad). El costo total de las
+   * puertas del laberinto no puede superarlo: como es tipo "frog war" (no se
+   * conoce el mapa), en el peor caso un equipo puede tener que abrir todas las
+   * puertas — si resolvió todos los retos, debe alcanzarle igual para llegar
+   * a la meta. */
+  maxTotalCost?: number
 }
 
-export default function MazeEditor({ competitionId, onSaved }: MazeEditorProps) {
+export default function MazeEditor({ competitionId, onSaved, maxTotalCost }: MazeEditorProps) {
   const [nodes, setNodes] = useState<MazeNode[]>([])
   const [doors, setDoors] = useState<MazeDoor[]>([])
   const [startNodeId, setStartNodeId] = useState<string | null>(null)
@@ -179,11 +186,20 @@ export default function MazeEditor({ competitionId, onSaved }: MazeEditorProps) 
   const selectedNode = selected?.type === "node" ? nodes.find(n => n.id === selected.id) : null
   const selectedDoor = selected?.type === "door" ? doors.find(d => d.id === selected.id) : null
 
+  const totalDoorCost = doors.reduce((sum, d) => sum + (d.cost || 0), 0)
+  const overBudget = maxTotalCost != null && totalDoorCost > maxTotalCost
+
   const handleSave = async () => {
     if (nodes.length < 2) { toast.error("Necesitas al menos 2 nodos"); return }
     if (!startNodeId) { toast.error("Define un nodo de inicio (click en nodo → Start)"); return }
     if (!goalNodeId) { toast.error("Define un nodo meta (click en nodo → Meta)"); return }
     if (doors.length === 0) { toast.error("Agrega al menos una puerta"); return }
+    if (overBudget) {
+      toast.error(
+        `El costo total de las puertas (${totalDoorCost}) supera los puntos obtenibles resolviendo todos los retos (${maxTotalCost}). Un equipo que resuelva todo podría no alcanzar la meta.`
+      )
+      return
+    }
 
     setIsSaving(true)
     try {
@@ -473,13 +489,23 @@ export default function MazeEditor({ competitionId, onSaved }: MazeEditorProps) 
       )}
 
       {/* Summary */}
-      <div className="flex gap-4 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
         <span>{nodes.length} nodos</span>
         <span>{doors.length} puertas</span>
         {startNodeId && <Badge variant="outline" className="text-xs py-0 text-green-600">🚀 Inicio: {nodeLabel(startNodeId)}</Badge>}
         {goalNodeId && <Badge variant="outline" className="text-xs py-0 text-yellow-600">🏆 Meta: {nodeLabel(goalNodeId)}</Badge>}
         {fogOfWar && <Badge variant="outline" className="text-xs py-0 text-indigo-600">🌫️ Niebla activa</Badge>}
+        {maxTotalCost != null && (
+          <Badge variant="outline" className={`text-xs py-0 ${overBudget ? "text-red-600 border-red-400" : "text-muted-foreground"}`}>
+            💰 Costo total: {totalDoorCost} / {maxTotalCost} pts
+          </Badge>
+        )}
       </div>
+      {overBudget && (
+        <p className="text-xs text-red-500">
+          El costo total de las puertas supera los puntos obtenibles resolviendo todos los retos. Reduce algún costo antes de guardar.
+        </p>
+      )}
     </div>
   )
 }
