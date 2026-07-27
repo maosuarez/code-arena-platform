@@ -8,7 +8,13 @@ Monorepo with two independent apps, both deployed on Vercel (single `vercel.json
 - `backend/` — FastAPI + Python, deployed as a Vercel Python function
 - `frontend/` — Next.js 15 + TypeScript, deployed as a Vercel Next.js app
 
-Database is MongoDB Atlas (M0 free tier). `.github/workflows/backend-db-bootstrap.yml` runs `backend/scripts/bootstrap_db.py` on every push touching `backend/**` to sync indexes/schema and seed the admin account — the FastAPI `lifespan` skips this itself on Vercel since ASGI lifespan events aren't guaranteed to run there (see `backend/app/main.py`).
+Database is MongoDB Atlas (M0 free tier). The FastAPI `lifespan` skips `ensure_indexes()`/`seed_admin()` itself on Vercel since ASGI lifespan events aren't guaranteed to run there (see `backend/app/main.py`), so after any change to `backend/app/database.py`'s `_INDEXES` (or to `seed_admin`), sync it to production manually:
+
+```bash
+gh workflow run backend-db-bootstrap.yml
+```
+
+This is deliberately `workflow_dispatch`-only, not wired to push — it's idempotent but runs against the real production Atlas cluster, so it needs a human to trigger it, not every commit.
 
 ## Commands
 

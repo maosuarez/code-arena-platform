@@ -3,16 +3,16 @@ name: Sync MongoDB Atlas indexes
 # Vercel's Python function build has no reliable post-deploy hook, and the
 # FastAPI lifespan skips ensure_indexes()/seed_admin() on Vercel (ASGI lifespan
 # events aren't guaranteed to run there — see backend/app/main.py). This
-# workflow is the only thing that actually applies backend/app/database.py's
-# _INDEXES to the production Atlas cluster after a change. bootstrap_db.py is
-# idempotent, so running it on every backend push is safe.
+# workflow is the only thing that applies backend/app/database.py's _INDEXES
+# to the production Atlas cluster.
+#
+# Manual only, on purpose: this runs against the real production database, so
+# it's not wired to `push` — a bad commit or compromised PR should never be
+# able to touch prod data with no human in the loop. Trigger it yourself after
+# a backend deploy that changed _INDEXES or seed_admin logic. See CLAUDE.md
+# for how.
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'backend/**'
   workflow_dispatch:
 
 jobs:
