@@ -557,8 +557,8 @@ export default function RankingPage({ params }: { params: Promise<{ id: string }
                     Actualización en tiempo real
                   </Badge>
                   <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                    <span className="text-sm text-muted-foreground">En vivo</span>
+                    <div className={cn("w-2 h-2 rounded-full", gameWinner ? "bg-slate-400" : "bg-green-500 animate-pulse")} />
+                    <span className="text-sm text-muted-foreground">{gameWinner ? "Finalizado" : "En vivo"}</span>
                   </div>
                 </div>
                 <Button

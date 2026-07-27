@@ -32,6 +32,7 @@ import {
   Flag,
   Info,
   Terminal,
+  Lock,
 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -42,6 +43,7 @@ import { Competition, Problem, MazeState, LANGUAGE_NAMES } from "@/lib/types"
 import { apiRequest } from "@/lib/api"
 import { Submission } from "@/lib/types"
 import { useCompetitionSocket } from "@/hooks/useCompetitionSocket"
+import { useTeamSocket } from "@/hooks/useTeamSocket"
 import MazeView from "@/components/competition/maze-view"
 
 /**
@@ -240,6 +242,21 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
     }
   })
 
+  // Si un admin elimina el equipo (o el creador disuelve la sala) mientras el
+  // jugador sigue en esta pantalla, hay que sacarlo de inmediato — de lo
+  // contrario quedaría viendo una competencia para un equipo que ya no existe.
+  useTeamSocket(myTeamCode, (msg) => {
+    if (msg.event === "team_disbanded") {
+      toast.info(
+        msg.data.reason === "admin"
+          ? "Un administrador eliminó tu equipo"
+          : "Tu equipo fue eliminado"
+      )
+      localStorage.removeItem('teamCode')
+      router.replace("/")
+    }
+  })
+
   useEffect(() => {
     if (winner) setPodiumDialogOpen(true)
   }, [winner])
@@ -373,6 +390,10 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
   }
 
   const openProblem = (problem: Problem) => {
+    if (timerStatus === "not_started") {
+      toast.error("Los problemas se destraban cuando inicie la competencia")
+      return
+    }
     setActiveProblem(problem)
     setSourceCode("")
     setSubmitResult(null)
@@ -657,6 +678,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                 <div className="space-y-2">
                   {filteredProblems.map(problem => {
                     const solved = isSolved(problem.id)
+                    const locked = timerStatus === "not_started"
                     const pts = competitionData.scoring?.[problem.difficulty]
                     return (
                       <Card
@@ -664,6 +686,8 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                         className={`transition-all duration-150 ${
                           solved
                             ? "border-green-500/40 bg-green-500/5 opacity-75"
+                            : locked
+                            ? "opacity-60 cursor-not-allowed"
                             : "hover:shadow-md hover:border-accent/40 cursor-pointer"
                         }`}
                         onClick={() => !solved && openProblem(problem)}
@@ -674,6 +698,8 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                             <div className="shrink-0">
                               {solved
                                 ? <CheckCircle className="h-5 w-5 text-green-500" />
+                                : locked
+                                ? <Lock className="h-5 w-5 text-muted-foreground" />
                                 : <div className="h-5 w-5 rounded-full border-2 border-muted-foreground/30" />
                               }
                             </div>
@@ -688,9 +714,14 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                                   {difficultyLabel(problem.difficulty)}
                                 </Badge>
                               </div>
-                              {!solved && (
+                              {!solved && !locked && (
                                 <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">
                                   {problem.statement?.slice(0, 90)}
+                                </p>
+                              )}
+                              {locked && (
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  Se destraba cuando inicie la competencia
                                 </p>
                               )}
                             </div>
@@ -703,7 +734,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                                 </div>
                                 <div className="text-[10px] text-muted-foreground uppercase tracking-wide">pts</div>
                               </div>
-                              {!solved && (
+                              {!solved && !locked && (
                                 <Button
                                   size="sm"
                                   className="bg-accent hover:bg-accent/90 h-8 px-3 shrink-0"

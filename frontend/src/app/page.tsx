@@ -86,6 +86,16 @@ export default function HomePage() {
         )
       )
     }
+    if (msg.event === "team_disbanded") {
+      toast.info(
+        msg.data.reason === "admin"
+          ? "Un administrador eliminó tu equipo"
+          : "Tu equipo fue eliminado"
+      )
+      localStorage.removeItem('teamCode')
+      setTeamCode('')
+      setIsTeamCreator(false)
+    }
   })
 
   const handleLeaveTeam = async () => {
@@ -238,7 +248,10 @@ export default function HomePage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => navigator.clipboard.writeText(teamCode)}
+                  onClick={() => {
+                    navigator.clipboard.writeText(teamCode)
+                    toast.success("Código copiado")
+                  }}
                   className="hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
                 >
                   Copiar
@@ -343,22 +356,22 @@ export default function HomePage() {
         <div className="grid gap-6 max-w-4xl mx-auto">
           {/* Sample Competition */}
           {listCompetition.map((competition, index) => {
-            const now = new Date()
             const compDate = new Date(competition.start_time ?? competition.date)
             const Icon = icons[index % icons.length] // Alternancia simple
 
-            // Estado temporal
+            // Estado real, calculado por el backend a partir de start/end time
+            // (no solo la fecha de inicio) — ver sync_competition_status.
             let statusLabel = ""
             let statusStyle = ""
-            if (competition.status === "active" && compDate <= now) {
+            if (competition.status === "active") {
               statusLabel = "🔴 En Vivo"
               statusStyle = "bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg animate-bounce"
-            } else if (compDate > now) {
-              statusLabel = "🟡 Próxima"
-              statusStyle = "bg-gradient-to-r from-yellow-400 to-orange-500 text-white shadow-md"
-            } else {
+            } else if (competition.status === "completed") {
               statusLabel = "⚫ Finalizada"
               statusStyle = "bg-gradient-to-r from-slate-500 to-slate-700 text-white shadow-sm"
+            } else {
+              statusLabel = "🟡 Próxima"
+              statusStyle = "bg-gradient-to-r from-yellow-400 to-orange-500 text-white shadow-md"
             }
 
             return (
