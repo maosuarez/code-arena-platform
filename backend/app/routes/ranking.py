@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from app.database import db
+from app.services.competition_lifecycle import sync_competition_status
 import random
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,9 @@ async def get_competition_ranking(competitionId: str):
         competition = await db["competition"].find_one({"id": competitionId})
         if not competition:
             raise HTTPException(status_code=404, detail="Competencia no encontrada")
+        # Si el tiempo ya venció y nadie llegó a la meta del laberinto, corona
+        # al líder en puntos para que siempre haya podio.
+        competition = await sync_competition_status(competition)
 
         problems = competition.get("problems", [])
         problem_lookup = {p["id"]: p["title"] for p in problems}

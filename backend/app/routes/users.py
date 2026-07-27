@@ -7,6 +7,7 @@ from app.models_entity.users import User, RegisterRequest
 from app.models_entity.general import Token
 from app.routes.auth import (get_current_user, get_password_hash, verify_password, create_access_token, require_admin)
 from app.limiter import limiter
+from app.services.competition_lifecycle import sync_competition_status
 
 logger = logging.getLogger(__name__)
 
@@ -73,16 +74,29 @@ async def admin_stats(_admin: dict = Depends(require_admin)):
         u["id"] = str(u.pop("_id"))
         users_list.append(u)
 
+    # Cuenta real de miembros por equipo (query de la fuente de verdad —
+    # `users.teamCode` — en vez de confiar en el contador `currentMembers`,
+    # que puede desincronizarse y dejar equipos huérfanos con 0 usuarios reales
+    # pero un contador que no lo refleja).
+    member_counts: dict[str, int] = {}
+    async for row in db["users"].aggregate([
+        {"$match": {"teamCode": {"$nin": [None, ""]}}},
+        {"$group": {"_id": "$teamCode", "count": {"$sum": 1}}},
+    ]):
+        member_counts[row["_id"]] = row["count"]
+
     teams_cursor = db["teams"].find({})
     teams_list = []
     async for t in teams_cursor:
         t["id"] = str(t.pop("_id"))
+        t["currentMembers"] = member_counts.get(t.get("code"), 0)
         teams_list.append(t)
 
     competitions_cursor = db["competition"].find({})
     competitions_list = []
     async for c in competitions_cursor:
         c.pop("_id", None)
+        c = await sync_competition_status(c)
         competitions_list.append(c)
 
     return {

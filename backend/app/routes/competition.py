@@ -13,6 +13,7 @@ from app.routes.auth import get_current_user, require_admin
 from app.services.users import validate_competition_date
 from app.services.websocket_manager import manager
 from app.services.judge0 import judge_submission
+from app.services.competition_lifecycle import sync_competition_status, compute_effective_status
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,7 @@ async def get_all_competitions():
                     if "_id" in p:
                         p["id"] = str(p.pop("_id"))
 
+            comp = await sync_competition_status(comp)
             competitions.append(comp)
 
         return {"list": competitions}
@@ -241,6 +243,7 @@ async def get_competition_by_id(competitionId: str):
         except Exception:
             pass  # Si ya es datetime o falla la conversión, se deja como está
 
+    competition = await sync_competition_status(competition)
     return {"competition": competition}
 
 @router.get("/private/{competitionId}")
@@ -261,6 +264,23 @@ async def get_competition_private(
             competition["date"] = datetime.fromisoformat(competition["date"])
         except ValueError:
             competition["date"] = None  # fallback explícito
+
+    competition = await sync_competition_status(competition)
+
+    # 🔒 La competencia aún no inició: no enviar el contenido de los problemas
+    # (statement / hidden_instructions), solo lo necesario para listarlos. Si no
+    # se hiciera aquí, el enunciado ya viajaría en este payload aunque el
+    # frontend bloquee el diálogo — dando ventaja a quien mire la network tab.
+    if competition.get("status") == "upcoming":
+        competition["problems"] = [
+            {
+                "id": p.get("id"),
+                "title": p.get("title"),
+                "difficulty": p.get("difficulty"),
+                "language_ids": p.get("language_ids"),
+            }
+            for p in competition.get("problems", [])
+        ]
 
     team_data: Optional[dict] = None
 
@@ -373,6 +393,9 @@ async def create_submission(
         competition = await db["competition"].find_one({"id": competitionId})
         if not competition:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Competencia no encontrada")
+        # Si el tiempo ya venció, ciérrala con el líder en puntos como ganador
+        # antes de evaluar si puede recibir este envío.
+        competition = await sync_competition_status(competition)
 
         # Validar problema dentro de la competencia
         problem_data = next((p for p in competition.get('problems', []) if str(p.get('id', '')) == problemId), None)
