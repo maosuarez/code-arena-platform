@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Structure
 
-Monorepo with two independent apps:
-- `backend/` — FastAPI + Python, deployed on Azure App Service
-- `frontend/` — Next.js 15 + TypeScript, deployed on Azure Static Web Apps
+Monorepo with two independent apps, both deployed on Vercel (single `vercel.json` at repo root defines both as services; push to `main` auto-deploys):
+- `backend/` — FastAPI + Python, deployed as a Vercel Python function
+- `frontend/` — Next.js 15 + TypeScript, deployed as a Vercel Next.js app
+
+Database is MongoDB Atlas (M0 free tier). `.github/workflows/backend-db-bootstrap.yml` runs `backend/scripts/bootstrap_db.py` on every push touching `backend/**` to sync indexes/schema and seed the admin account — the FastAPI `lifespan` skips this itself on Vercel since ASGI lifespan events aren't guaranteed to run there (see `backend/app/main.py`).
 
 ## Commands
 
@@ -16,7 +18,7 @@ cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload        # dev server at :8000
 ```
-Requires `.env` with `MONGO_URL` and `MONGO_DB` (MongoDB — local Docker container or external).
+Requires `.env` with `MONGO_URL` and `MONGO_DB` (local Docker container for dev; MongoDB Atlas M0 in production).
 
 ### Frontend
 ```bash
