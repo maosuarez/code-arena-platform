@@ -30,6 +30,8 @@ import {
   X,
   Copy,
   Flag,
+  Info,
+  Terminal,
 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -45,11 +47,18 @@ import MazeView from "@/components/competition/maze-view"
 /**
  * Splits a statement around its midpoint so the hidden anti-cheat text can be
  * inserted there. Shared by the on-screen renderer and the clipboard text
- * builder so both stay in sync.
+ * builder so both stay in sync. Snaps to the nearest whitespace so the split
+ * never lands mid-word (e.g. "tamaño del" + "arreglo" instead of "tamaño delarreglo").
  */
 function splitStatement(statement: string): { firstHalf: string; secondHalf: string } {
   const mid = Math.floor(statement.length / 2)
-  return { firstHalf: statement.slice(0, mid), secondHalf: statement.slice(mid) }
+  let splitAt = mid
+  const halfLen = Math.ceil(statement.length / 2)
+  for (let offset = 0; offset <= halfLen; offset++) {
+    if (/\s/.test(statement[mid + offset] ?? "")) { splitAt = mid + offset + 1; break }
+    if (/\s/.test(statement[mid - offset] ?? "")) { splitAt = mid - offset + 1; break }
+  }
+  return { firstHalf: statement.slice(0, splitAt), secondHalf: statement.slice(splitAt) }
 }
 
 /**
@@ -138,6 +147,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
   const [hideCompleted, setHideCompleted] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [rulesModalOpen, setRulesModalOpen] = useState(false)
+  const [helpModalOpen, setHelpModalOpen] = useState(false)
   const [competitionData, setCompetitionData] = useState<Competition>({} as Competition)
   const [problems, setProblems] = useState<Problem[]>([])
   const [members, setMembers] = useState<{ id: string; username: string; leetcode: string }[]>([])
@@ -1016,8 +1026,109 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
               </Button>
             </div>
           </div>
+
+          {/* Help / info button */}
+          <button
+            type="button"
+            onClick={() => setHelpModalOpen(true)}
+            title="Ayuda y ejemplos de uso"
+            className="fixed bottom-5 right-5 z-[60] flex h-10 w-10 items-center justify-center rounded-full bg-accent text-accent-foreground shadow-lg hover:bg-accent/90 transition-colors"
+          >
+            <Info className="h-5 w-5" />
+          </button>
         </div>
       )}
+
+      {/* Help Modal */}
+      <Dialog open={helpModalOpen} onOpenChange={setHelpModalOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Info className="h-5 w-5 text-accent" />
+              Guía rápida para resolver problemas
+            </DialogTitle>
+            <DialogDescription>
+              Cómo debe leer y mostrar los datos tu solución para que el evaluador la acepte
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 text-sm">
+            <section className="space-y-1.5">
+              <h4 className="font-semibold flex items-center gap-1.5">
+                <Terminal className="h-3.5 w-3.5" />
+                Cómo se evalúa tu código
+              </h4>
+              <ul className="space-y-1 text-muted-foreground">
+                <li>• Tu programa recibe los datos de cada caso de prueba por <span className="font-mono text-foreground">entrada estándar (stdin)</span>.</li>
+                <li>• El evaluador compara, de forma <span className="text-foreground font-medium">exacta</span>, lo que tu programa imprime en <span className="font-mono text-foreground">salida estándar (stdout)</span> contra la salida esperada.</li>
+                <li>• Es de suma importancia que <span className="text-foreground font-medium">solo imprimas el resultado esperado</span> — nada de mensajes de bienvenida, prompts (&quot;Ingresa un número:&quot;), texto de depuración ni logs. Cualquier línea extra hace que el caso falle.</li>
+                <li>• Respeta el formato exacto del ejemplo: mayúsculas/minúsculas, espacios y saltos de línea cuentan.</li>
+              </ul>
+            </section>
+
+            <section className="space-y-1.5">
+              <h4 className="font-semibold">Ejemplo: leer dos enteros e imprimir su suma</h4>
+              <p className="text-muted-foreground">Entrada de ejemplo: <span className="font-mono text-foreground">3 5</span> → Salida esperada: <span className="font-mono text-foreground">8</span></p>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground mb-1">Python 3</p>
+                  <pre className="bg-muted/60 rounded-lg p-2.5 text-xs overflow-x-auto"><code>{`a, b = map(int, input().split())\nprint(a + b)`}</code></pre>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground mb-1">JavaScript</p>
+                  <pre className="bg-muted/60 rounded-lg p-2.5 text-xs overflow-x-auto"><code>{`const [a, b] = require("fs")\n  .readFileSync(0, "utf8")\n  .trim().split(" ").map(Number)\nconsole.log(a + b)`}</code></pre>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground mb-1">Java</p>
+                  <pre className="bg-muted/60 rounded-lg p-2.5 text-xs overflow-x-auto"><code>{`import java.util.Scanner;\npublic class Main {\n  public static void main(String[] args) {\n    Scanner sc = new Scanner(System.in);\n    int a = sc.nextInt(), b = sc.nextInt();\n    System.out.println(a + b);\n  }\n}`}</code></pre>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground mb-1">C++</p>
+                  <pre className="bg-muted/60 rounded-lg p-2.5 text-xs overflow-x-auto"><code>{`#include <iostream>\nusing namespace std;\nint main() {\n  int a, b;\n  cin >> a >> b;\n  cout << a + b << endl;\n}`}</code></pre>
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-1.5">
+              <h4 className="font-semibold">Ejemplo: entrada en varias líneas</h4>
+              <p className="text-muted-foreground">
+                Si el enunciado dice <span className="font-mono text-foreground">línea 1: 3</span>, <span className="font-mono text-foreground">línea 2: 4</span>, cada valor llega en su propio renglón de stdin — léelos con dos lecturas separadas, no como <span className="font-mono text-foreground">&quot;3 4&quot;</span> en una sola línea.
+              </p>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground mb-1">Python 3</p>
+                  <pre className="bg-muted/60 rounded-lg p-2.5 text-xs overflow-x-auto"><code>{`a = int(input())\nb = int(input())\nprint(a + b)`}</code></pre>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground mb-1">JavaScript</p>
+                  <pre className="bg-muted/60 rounded-lg p-2.5 text-xs overflow-x-auto"><code>{`const [a, b] = require("fs")\n  .readFileSync(0, "utf8")\n  .trim().split("\\n").map(Number)\nconsole.log(a + b)`}</code></pre>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground mb-1">Java</p>
+                  <pre className="bg-muted/60 rounded-lg p-2.5 text-xs overflow-x-auto"><code>{`import java.util.Scanner;\npublic class Main {\n  public static void main(String[] args) {\n    Scanner sc = new Scanner(System.in);\n    int a = sc.nextInt();\n    int b = sc.nextInt();\n    System.out.println(a + b);\n  }\n}`}</code></pre>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground mb-1">C++</p>
+                  <pre className="bg-muted/60 rounded-lg p-2.5 text-xs overflow-x-auto"><code>{`#include <iostream>\nusing namespace std;\nint main() {\n  int a, b;\n  cin >> a >> b;\n  cout << a + b << endl;\n}`}</code></pre>
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-1.5">
+              <h4 className="font-semibold">Tips rápidos</h4>
+              <ul className="space-y-1 text-muted-foreground">
+                <li>• Imprime únicamente lo que se pide — eso es lo único que lee el evaluador.</li>
+                <li>• Quita cualquier <span className="font-mono text-foreground">print</span>/<span className="font-mono text-foreground">console.log</span> de depuración antes de enviar.</li>
+                <li>• Si el problema espera varias líneas de salida, sepáralas con saltos de línea, igual que en el ejemplo del enunciado.</li>
+                <li>• Verifica el enunciado a mano con el ejemplo de entrada/salida antes de enviar tu solución.</li>
+                <li>• Selecciona el lenguaje correcto en el menú desplegable antes de enviar — debe coincidir con tu código.</li>
+              </ul>
+            </section>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Podium Modal */}
       <Dialog open={podiumDialogOpen} onOpenChange={setPodiumDialogOpen}>
