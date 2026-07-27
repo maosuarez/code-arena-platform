@@ -20,6 +20,7 @@ class TeamCode(BaseModel):
     color: str
     maxMembers: int
     currentMembers: int
+    creatorUsername: Optional[str] = None
     points: Optional[int] = 0
     submissions: Optional[List[Submission]] = []
 

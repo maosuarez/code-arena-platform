@@ -6,13 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Users, UserPlus, Trophy, Settings,
-  Clipboard, Eye, UserMinus, Play, Star, Sparkles, Target, Bolt } from "lucide-react"
+  Clipboard, Eye, UserMinus, Play, Star, Sparkles, Target, Bolt, Trash2 } from "lucide-react"
 import { LoginModal } from "@/components/auth/login-modal"
 import { CreateTeamModal } from "@/components/team/create-team-modal"
 import { JoinTeamModal } from "@/components/team/join-team-modal"
 import { CompetitionDetailsModal } from "@/components/competition/competition-details-modal"
 import { toast } from "sonner"
-import { Competition } from "@/lib/types"
+import { Competition, TeamCode } from "@/lib/types"
 import { useTeamCode } from "@/hooks/useTeamCode"
 import { useTeamSocket } from "@/hooks/useTeamSocket"
 import { useAuth } from "@/hooks/useAuth"
@@ -30,6 +30,7 @@ export default function HomePage() {
   const { teamCode, setTeamCode } = useTeamCode()
   const { currentUser, isAuthenticated, isLoading } = useAuth()
   const isAdmin = currentUser?.is_admin === true
+  const [isTeamCreator, setIsTeamCreator] = useState(false)
 
   const icons = [Trophy, Star, Target, Bolt]
 
@@ -88,6 +89,7 @@ export default function HomePage() {
   })
 
   const handleLeaveTeam = async () => {
+    if (!confirm("¿Salir del equipo? Podrás volver a unirte con el código si sigue existiendo.")) return
     try {
       await apiRequest('/teams/delete', {
         method: 'DELETE',
@@ -95,11 +97,31 @@ export default function HomePage() {
       })
     } catch (error) {
       console.error("Error al dejar el equipo:", error)
-      // Puedes mostrar un toast o alerta aquí si quieres
+      toast.error(error instanceof Error ? error.message : "Error al dejar el equipo")
     } finally {
       localStorage.removeItem('teamCode')
       setTeamCode('')
+      setIsTeamCreator(false)
     }
+  }
+
+  const handleDisbandTeam = async () => {
+    if (!confirm("¿Eliminar la sala por completo? Se expulsará a todos los miembros del equipo.")) return
+    if (!confirm("Esta acción es irreversible. ¿Confirmas que quieres eliminar la sala para todos?")) return
+    try {
+      await apiRequest('/teams/disband', {
+        method: 'DELETE',
+        token: true
+      })
+      toast.success("Sala eliminada")
+    } catch (error) {
+      console.error("Error al eliminar la sala:", error)
+      toast.error(error instanceof Error ? error.message : "Error al eliminar la sala")
+      return
+    }
+    localStorage.removeItem('teamCode')
+    setTeamCode('')
+    setIsTeamCreator(false)
   }
 
   function formatTeamCode(code: string): string {
@@ -125,6 +147,16 @@ export default function HomePage() {
 
     fetchCompetitions()
   }, [])
+
+  useEffect(() => {
+    if (!teamCode || !currentUser) {
+      setIsTeamCreator(false)
+      return
+    }
+    apiRequest<{ team: TeamCode }>(`/teams/team/${teamCode}`, { method: "GET", token: true })
+      .then(res => setIsTeamCreator(res.team.creatorUsername === currentUser.username))
+      .catch(() => setIsTeamCreator(false))
+  }, [teamCode, currentUser])
 
 
 
@@ -272,6 +304,17 @@ export default function HomePage() {
                 <UserMinus className="mr-2 h-4 w-4" />
                 Salir del Equipo
               </Button>
+              {isTeamCreator && (
+                <Button
+                  variant="destructive"
+                  className="w-full"
+                  size="lg"
+                  onClick={() => handleDisbandTeam()}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Eliminar Sala (expulsar a todos)
+                </Button>
+              )}
               <div className="text-center pt-2">
                 <Button
                   variant="ghost"

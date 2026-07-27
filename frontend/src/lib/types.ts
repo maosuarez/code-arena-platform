@@ -25,6 +25,7 @@ export interface TeamCode {
   color: string
   maxMembers: number
   currentMembers: number
+  creatorUsername?: string
   submissions: Submission[]
   points: number
 }
@@ -38,6 +39,17 @@ export interface Problem {
   time_limit?: number
   memory_limit?: number
   hidden_instructions?: string
+}
+
+export interface TestCase {
+  input: string
+  expected: string
+}
+
+// Problem-bank entry: same shape as Problem, plus its test cases (admin-only, never
+// exposed through competition endpoints).
+export interface BankProblem extends Problem {
+  testCases?: TestCase[]
 }
 
 export interface Competition {

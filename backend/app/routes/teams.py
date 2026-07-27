@@ -29,6 +29,7 @@ async def create_team(request: TeamCreateRequest, current_user: dict = Depends(g
                     "color": request.color,
                     "maxMembers": request.maxMembers,
                     "currentMembers": 1,
+                    "creatorUsername": current_user["username"],
                 }, strict=False)
             except Exception:
                 logger.exception("Error validando el modelo TeamCode")
@@ -139,6 +140,39 @@ async def delete_team(current_user: dict = Depends(get_current_user)):
         raise http_err
     except Exception:
         logger.exception("Error interno al eliminar el equipo")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
+
+
+# ────────────────────────────────────────────────────────────────
+@router.delete("/disband")
+async def disband_team(current_user: dict = Depends(get_current_user)):
+    """Elimina la sala por completo: solo el creador del equipo puede expulsar
+    a todos los miembros y borrar el equipo, sin importar cuántos queden."""
+    try:
+        user = await db["users"].find_one({"username": current_user["username"]})
+        if not user or not user.get("teamCode"):
+            raise HTTPException(status_code=400, detail="No perteneces a ningún equipo")
+
+        team_code = user["teamCode"]
+        team = await db["teams"].find_one({"code": team_code})
+        if not team:
+            raise HTTPException(status_code=404, detail="Equipo no encontrado")
+
+        if team.get("creatorUsername") != current_user["username"]:
+            raise HTTPException(status_code=403, detail="Solo quien creó la sala puede eliminarla")
+
+        await db["users"].update_many(
+            {"teamCode": team_code},
+            {"$set": {"teamCode": ""}}
+        )
+        await db["teams"].delete_one({"code": team_code})
+
+        return {"message": "Sala eliminada y todos los miembros desvinculados"}
+
+    except HTTPException as http_err:
+        raise http_err
+    except Exception:
+        logger.exception("Error interno al eliminar la sala")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
