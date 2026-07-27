@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
-from app.routes import auth, competition, users, teams, ranking, maze
+from app.routes import auth, competition, users, teams, ranking, maze, problems
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import db, ensure_indexes
 from app.routes.auth import get_password_hash
@@ -112,6 +112,7 @@ app.include_router(teams.router, prefix="/teams", tags=["Teams"])
 app.include_router(ranking.router, prefix="/ranking", tags=["Ranking"])
 app.include_router(competition.router, prefix="/competition", tags=["Competition"])
 app.include_router(maze.router, prefix="/maze", tags=["Maze"])
+app.include_router(problems.router, prefix="/problems", tags=["Problems"])
 
 @app.get("/")
 def root():

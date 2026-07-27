@@ -55,7 +55,8 @@ class RequestCompetition(BaseModel):
     date: datetime
     status: Literal["active", "inactive", "completed", "upcoming"]
     duration: int
-    problems: List[ProblemCreate]
+    problems: List[ProblemCreate] = []
+    problem_ids: List[str] = []
     rules: List[str]
     scoring: Scoring
     start_time: Optional[datetime] = None
@@ -73,3 +74,14 @@ class CompetitionUpdate(BaseModel):
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     problems: Optional[List[ProblemCreate]] = None
+    problem_ids: Optional[List[str]] = None
+
+class ProblemUpdate(BaseModel):
+    title: Optional[str] = None
+    difficulty: Optional[Literal["easy", "medium", "hard"]] = None
+    statement: Optional[str] = None
+    language_ids: Optional[List[int]] = None
+    time_limit: Optional[float] = None
+    memory_limit: Optional[int] = None
+    hidden_instructions: Optional[str] = None
+    testCases: Optional[List[TestCase]] = None
