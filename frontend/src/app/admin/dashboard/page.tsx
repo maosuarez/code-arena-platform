@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Users, Trophy, Target, Plus, Eye, Lock, Map, Pencil, X, CheckCircle, ChevronDown, ChevronUp, Trash2, Library } from "lucide-react"
+import { Users, Trophy, Target, Plus, Eye, Lock, Map, Pencil, X, CheckCircle, ChevronDown, ChevronUp, Trash2, Library, Search } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
@@ -18,7 +18,7 @@ import Link from "next/link"
 import { apiRequest } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import MazeEditor from "@/components/competition/maze-editor"
-import { LANGUAGE_NAMES } from "@/lib/types"
+import { LANGUAGE_NAMES, BankProblem } from "@/lib/types"
 
 type TestCase = { input: string; expected: string }
 type ProblemDraft = {
@@ -137,6 +137,13 @@ export default function AdminDashboard() {
   const [isVerifyingProblem, setIsVerifyingProblem] = useState<string | null>(null)
   const [isLoadingTestCases, setIsLoadingTestCases] = useState(false)
 
+  // Problem bank picker within edit dialog
+  const [bankProblems, setBankProblems] = useState<BankProblem[]>([])
+  const [bankLoading, setBankLoading] = useState(false)
+  const [bankSearch, setBankSearch] = useState("")
+  const [bankDifficultyFilter, setBankDifficultyFilter] = useState<"all" | "easy" | "medium" | "hard">("all")
+  const [addingBankId, setAddingBankId] = useState<string | null>(null)
+
   useEffect(() => {
     if (isLoading) return
     if (!isAuthenticated || !currentUser?.is_admin) {
@@ -152,6 +159,48 @@ export default function AdminDashboard() {
       .catch(() => toast.error("Error al cargar estadísticas"))
       .finally(() => setStatsLoading(false))
   }, [isAuthenticated, currentUser])
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.is_admin) return
+    setBankLoading(true)
+    apiRequest<{ list: BankProblem[] }>("/problems/all", { token: true })
+      .then(res => setBankProblems(res.list))
+      .catch(() => toast.error("No se pudo cargar el banco de problemas"))
+      .finally(() => setBankLoading(false))
+  }, [isAuthenticated, currentUser])
+
+  const filteredBankProblems = bankProblems.filter(p => {
+    if (bankDifficultyFilter !== "all" && p.difficulty !== bankDifficultyFilter) return false
+    if (bankSearch.trim() && !p.title.toLowerCase().includes(bankSearch.trim().toLowerCase())) return false
+    return true
+  })
+
+  const toggleEditBankSelection = async (problem: BankProblem) => {
+    if (editProblems.some(p => p.id === problem.id)) {
+      removeProblemFromEdit(problem.id)
+      return
+    }
+    setAddingBankId(problem.id)
+    try {
+      const { cases } = await apiRequest<{ cases: TestCase[] }>(
+        `/competition/problems/${problem.id}/testcases`,
+        { method: "GET", token: true }
+      ).catch(() => ({ cases: [] }))
+      setEditProblems(prev => [...prev, {
+        id: problem.id,
+        title: problem.title,
+        difficulty: problem.difficulty,
+        statement: problem.statement,
+        language_ids: problem.language_ids.length > 0 ? problem.language_ids : [71, 62, 54, 63],
+        time_limit: problem.time_limit ?? 2.0,
+        memory_limit: problem.memory_limit ?? 256,
+        hidden_instructions: problem.hidden_instructions,
+        testCases: cases,
+      }])
+    } finally {
+      setAddingBankId(null)
+    }
+  }
 
   const handleChangePassword = async () => {
     if (!currentPassword || !newPassword) {
@@ -286,6 +335,21 @@ export default function AdminDashboard() {
       setStats(data)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al eliminar")
+    }
+  }
+
+  const deleteTeam = async (team: AdminTeam) => {
+    const memberWarning = (team.currentMembers ?? 0) > 0
+      ? ` Sus ${team.currentMembers} miembro(s) serán expulsados de inmediato.`
+      : ""
+    if (!confirm(`¿Eliminar el equipo "${team.teamName}" (${team.code})?${memberWarning} Esta acción no se puede deshacer.`)) return
+    try {
+      await apiRequest(`/teams/admin/${team.code}`, { method: "DELETE", token: true })
+      toast.success("Equipo eliminado")
+      const data = await apiRequest<AdminStats>("/users/admin/stats", { method: "GET", token: true })
+      setStats(data)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar el equipo")
     }
   }
 
@@ -554,8 +618,21 @@ export default function AdminDashboard() {
                           <p className="font-medium">{team.teamName}</p>
                           <p className="text-sm text-muted-foreground font-mono">{team.code}</p>
                         </div>
-                        <div className="text-right">
-                          <p className="font-bold text-accent">{team.points} pts</p>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="font-bold text-accent">{team.points} pts</p>
+                            <p className={`text-xs ${(team.currentMembers ?? 0) === 0 ? "text-red-500 font-semibold" : "text-muted-foreground"}`}>
+                              {team.currentMembers ?? 0} miembro{team.currentMembers === 1 ? "" : "s"}
+                              {(team.currentMembers ?? 0) === 0 && " · huérfano"}
+                            </p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteTeam(team)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
                         </div>
                       </div>
                     </CardContent>
@@ -709,6 +786,72 @@ export default function AdminDashboard() {
             {/* Problems section */}
             <div className="space-y-4">
               <p className="text-sm font-semibold">Challenges ({editProblems.length})</p>
+
+              {/* Bank picker */}
+              <div>
+                <p className="text-sm font-medium mb-2 flex items-center gap-2">
+                  <Library className="h-4 w-4 text-accent" />
+                  Agregar del banco de problemas
+                </p>
+                <div className="space-y-3 p-4 border rounded-xl bg-muted/20">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={bankSearch}
+                        onChange={e => setBankSearch(e.target.value)}
+                        placeholder="Buscar por título..."
+                        className="pl-8"
+                      />
+                    </div>
+                    <div className="flex gap-1.5">
+                      {(["all", "easy", "medium", "hard"] as const).map(d => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setBankDifficultyFilter(d)}
+                          className={`px-3 py-1.5 rounded-full text-xs border transition-colors whitespace-nowrap ${
+                            bankDifficultyFilter === d
+                              ? "bg-accent text-accent-foreground border-accent"
+                              : "border-muted-foreground text-muted-foreground"
+                          }`}
+                        >
+                          {d === "all" ? "Todas" : difficultyLabel(d)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {bankLoading ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">Cargando banco de problemas...</p>
+                  ) : filteredBankProblems.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      {bankProblems.length === 0 ? "El banco de problemas está vacío." : "Sin resultados para este filtro."}
+                    </p>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+                      {filteredBankProblems.map(p => (
+                        <label
+                          key={p.id}
+                          className="flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer hover:bg-muted/40"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editProblems.some(ep => ep.id === p.id)}
+                            disabled={addingBankId === p.id}
+                            onChange={() => toggleEditBankSelection(p)}
+                            className="h-4 w-4 accent-accent"
+                          />
+                          <span className="text-sm font-medium flex-1">{p.title}</span>
+                          <Badge className={`text-xs ${getDifficultyColor(p.difficulty)}`}>
+                            {difficultyLabel(p.difficulty)}
+                          </Badge>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {/* Existing problems list */}
               {editProblems.length > 0 && (
@@ -992,12 +1135,19 @@ export default function AdminDashboard() {
               {stats?.competitions.find(c => c.id === mazeEditorCompId)?.title ?? mazeEditorCompId}
             </DialogTitle>
           </DialogHeader>
-          {mazeEditorCompId && (
-            <MazeEditor
-              competitionId={mazeEditorCompId}
-              onSaved={() => setMazeEditorCompId(null)}
-            />
-          )}
+          {mazeEditorCompId && (() => {
+            const comp = stats?.competitions.find(c => c.id === mazeEditorCompId)
+            const maxTotalCost = comp
+              ? comp.problems.reduce((sum, p) => sum + (comp.scoring?.[(p.difficulty ?? "easy") as "easy" | "medium" | "hard"] ?? 0), 0)
+              : undefined
+            return (
+              <MazeEditor
+                competitionId={mazeEditorCompId}
+                onSaved={() => setMazeEditorCompId(null)}
+                maxTotalCost={maxTotalCost}
+              />
+            )
+          })()}
         </DialogContent>
       </Dialog>
     </div>

@@ -11,11 +11,12 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Trash2, ChevronDown, ChevronUp, Pencil, X, Search, ArrowLeft } from "lucide-react"
+import { Plus, Trash2, ChevronDown, ChevronUp, Pencil, X, Search, ArrowLeft, Download } from "lucide-react"
 import Link from "next/link"
 import { apiRequest } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import { BankProblem, TestCase, LANGUAGE_NAMES } from "@/lib/types"
+import yaml from "js-yaml"
 
 const ALL_LANGUAGE_IDS = [71, 62, 54, 63]
 
@@ -168,6 +169,32 @@ export default function ProblemBankPage() {
   }
   const difficultyLabel = (d: string) => d === "easy" ? "Fácil" : d === "medium" ? "Medio" : "Difícil"
 
+  // Resumen del banco para pegarle a una IA junto al YAML de creación de
+  // competencias, así puede referenciar problem_ids existentes en vez de
+  // recrearlos. hidden_instructions se excluye a propósito: es el señuelo
+  // anti-copia, filtrarlo aquí lo inutilizaría.
+  const downloadGuide = () => {
+    const guide = {
+      generated_at: new Date().toISOString(),
+      note: "Banco de problemas reutilizables. Referencia sus 'id' en el campo problem_ids del YAML de creación de competencia en vez de recrearlos.",
+      problems: problems.map(p => ({
+        id: p.id,
+        title: p.title,
+        difficulty: p.difficulty,
+        languages: p.language_ids.map(id => LANGUAGE_NAMES[id] ?? id),
+        statement: p.statement,
+      })),
+    }
+    const text = yaml.dump(guide, { lineWidth: 100 })
+    const blob = new Blob([text], { type: "text/yaml" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `banco-problemas-${new Date().toISOString().slice(0, 10)}.yaml`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-8">
@@ -182,10 +209,16 @@ export default function ProblemBankPage() {
             </p>
           </div>
           {!formOpen && (
-            <Button onClick={startCreate} className="bg-accent hover:bg-accent/90">
-              <Plus className="mr-2 h-4 w-4" />
-              Nuevo Problema
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={downloadGuide} disabled={problems.length === 0}>
+                <Download className="mr-2 h-4 w-4" />
+                Descargar guía YAML
+              </Button>
+              <Button onClick={startCreate} className="bg-accent hover:bg-accent/90">
+                <Plus className="mr-2 h-4 w-4" />
+                Nuevo Problema
+              </Button>
+            </div>
           )}
         </div>
 
