@@ -6,11 +6,29 @@ from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from app.database import db
 from app.models_entity.teams import TeamCreateRequest, TeamCode, JoinTeamRequest
-from app.routes.auth import get_current_user
+from app.routes.auth import get_current_user, require_admin
+from app.services.websocket_manager import manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _teardown_team(team_code: str, *, reason: str) -> None:
+    """Fully unwinds a team: unlinks every member, strips the code from all
+    competition rosters, drops any maze progress, deletes the team doc, and
+    kicks any connected members in real time. Shared by self-service disband
+    and admin deletion so neither path leaves leftovers (dangling team codes
+    in competition rosters, orphaned maze progress, stuck teamCode on users)."""
+    await db["users"].update_many({"teamCode": team_code}, {"$set": {"teamCode": ""}})
+    await db["competition"].update_many({"teams": team_code}, {"$pull": {"teams": team_code}})
+    await db["maze_progress"].delete_many({"teamCode": team_code})
+    await db["teams"].delete_one({"code": team_code})
+    await manager.broadcast_team(team_code, {
+        "event": "team_disbanded",
+        "data": {"teamCode": team_code, "reason": reason},
+    })
+
 
 # ────────────────────────────────────────────────────────────────
 @router.post("/create")
@@ -161,11 +179,7 @@ async def disband_team(current_user: dict = Depends(get_current_user)):
         if team.get("creatorUsername") != current_user["username"]:
             raise HTTPException(status_code=403, detail="Solo quien creó la sala puede eliminarla")
 
-        await db["users"].update_many(
-            {"teamCode": team_code},
-            {"$set": {"teamCode": ""}}
-        )
-        await db["teams"].delete_one({"code": team_code})
+        await _teardown_team(team_code, reason="creator")
 
         return {"message": "Sala eliminada y todos los miembros desvinculados"}
 
@@ -173,6 +187,27 @@ async def disband_team(current_user: dict = Depends(get_current_user)):
         raise http_err
     except Exception:
         logger.exception("Error interno al eliminar la sala")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
+
+
+# ────────────────────────────────────────────────────────────────
+@router.delete("/admin/{team_code}")
+async def admin_delete_team(team_code: str, _admin: dict = Depends(require_admin)):
+    """Admin-only teardown — e.g. cleaning up orphaned teams (0 real members)
+    left behind by users who abandoned the app without disbanding."""
+    try:
+        team = await db["teams"].find_one({"code": team_code})
+        if not team:
+            raise HTTPException(status_code=404, detail="Equipo no encontrado")
+
+        await _teardown_team(team_code, reason="admin")
+
+        return {"message": "Equipo eliminado por el administrador"}
+
+    except HTTPException as http_err:
+        raise http_err
+    except Exception:
+        logger.exception("Error interno al eliminar el equipo (admin)")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
