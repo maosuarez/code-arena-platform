@@ -1,12 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Lock, Unlock, Flag, MapPin, ChevronRight, AlertTriangle, Footprints, Compass } from "lucide-react"
+import { Lock, Unlock, Flag, MapPin, ChevronRight, AlertTriangle, Footprints, Compass, ZoomIn, ZoomOut, Maximize } from "lucide-react"
 import { MazeState, MazeDoor, TeamMazeState } from "@/lib/types"
+
+const MIN_SCALE = 0.5
+const MAX_SCALE = 4
 
 const TEAM_COLORS = [
   "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
@@ -31,6 +34,43 @@ interface MazeViewProps {
 export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, onMove, isUnlocking, isMoving }: MazeViewProps) {
   const [selectedDoor, setSelectedDoor] = useState<string | null>(null)
   const [confirmDoorId, setConfirmDoorId] = useState<string | null>(null)
+
+  // Pan/zoom del canvas del laberinto — transform CSS sobre un wrapper, no
+  // toca el viewBox del SVG, así que las coordenadas de puertas/nodos (0-100)
+  // y todos los handlers existentes siguen funcionando sin cambios.
+  const [scale, setScale] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; panStartX: number; panStartY: number; moved: boolean } | null>(null)
+  const suppressClickRef = useRef(false)
+
+  const zoomBy = (factor: number) => setScale(prev => Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev * factor)))
+  const resetView = () => { setScale(1); setPan({ x: 0, y: 0 }) }
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault()
+    const factor = e.deltaY < 0 ? 1.1 : 0.9
+    setScale(prev => Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev * factor)))
+  }
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragRef.current = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, panStartX: pan.x, panStartY: pan.y, moved: false }
+  }
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    const dx = e.clientX - drag.startX
+    const dy = e.clientY - drag.startY
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true
+    setPan({ x: drag.panStartX + dx, y: drag.panStartY + dy })
+  }
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (drag?.pointerId === e.pointerId && drag.moved) suppressClickRef.current = true
+    dragRef.current = null
+  }
 
   if (!mazeState) {
     return (
@@ -147,20 +187,8 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, onMove, 
         </div>
       )}
 
-      {/* Team legend + door status key */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-3">
-          {teams.map(t => (
-            <div key={t.teamCode} className="flex items-center gap-1.5 text-xs">
-              <div className="w-3 h-3 rounded-full shrink-0" style={{ background: teamColor(t.teamCode, teams) }} />
-              <span className={t.teamCode === myTeamCode ? "font-bold" : "text-muted-foreground"}>
-                {t.avatar} {t.teamName}
-              </span>
-              <Badge variant="outline" className="text-[10px] py-0 px-1.5">{t.availablePoints} pts</Badge>
-            </div>
-          ))}
-        </div>
-        {/* Color legend for doors */}
+      {/* Door status key — quién está dónde ya se ve, más claro, en "Equipos en el laberinto" */}
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
           <span className="flex items-center gap-1"><span className="w-4 h-0.5 inline-block bg-amber-500 rounded" />Asequible</span>
           <span className="flex items-center gap-1"><span className="w-4 h-0.5 inline-block bg-orange-500 rounded" />Caro</span>
@@ -173,8 +201,24 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, onMove, 
       <div className="grid lg:grid-cols-3 gap-4">
         {/* SVG Maze */}
         <div className="lg:col-span-2">
-          <div className="border rounded-xl bg-muted/20 p-2 overflow-hidden">
-            <svg viewBox={vb} className="w-full" style={{ maxHeight: 480 }}>
+          <div
+            className="relative border rounded-xl bg-muted/20 p-2 overflow-hidden select-none"
+            style={{ height: 480, touchAction: "none" }}
+            onWheel={handleWheel}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+          >
+            <div
+              className="w-full h-full"
+              style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+                transformOrigin: "center center",
+                cursor: dragRef.current ? "grabbing" : "grab",
+              }}
+            >
+            <svg viewBox={vb} className="w-full h-full">
               {/* Draw doors (edges) */}
               {config.doors.map(door => {
                 const fromNode = config.nodes.find(n => n.id === door.from_node)
@@ -189,7 +233,10 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, onMove, 
                 return (
                   <g
                     key={door.id}
-                    onClick={() => setSelectedDoor(isSelected ? null : door.id)}
+                    onClick={() => {
+                      if (suppressClickRef.current) { suppressClickRef.current = false; return }
+                      setSelectedDoor(isSelected ? null : door.id)
+                    }}
                     style={{ cursor: "pointer" }}
                   >
                     {/* Glow for affordable doors */}
@@ -277,6 +324,20 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, onMove, 
                 )
               })}
             </svg>
+            </div>
+
+            {/* Zoom controls */}
+            <div className="absolute bottom-3 right-3 flex flex-col gap-1">
+              <Button type="button" size="icon" variant="outline" className="h-7 w-7 bg-background/90" onClick={() => zoomBy(1.25)}>
+                <ZoomIn className="h-3.5 w-3.5" />
+              </Button>
+              <Button type="button" size="icon" variant="outline" className="h-7 w-7 bg-background/90" onClick={() => zoomBy(0.8)}>
+                <ZoomOut className="h-3.5 w-3.5" />
+              </Button>
+              <Button type="button" size="icon" variant="outline" className="h-7 w-7 bg-background/90" onClick={resetView}>
+                <Maximize className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         </div>
 
