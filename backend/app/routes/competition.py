@@ -21,6 +21,19 @@ MAX_SOURCE_CODE_BYTES = 65536  # 64 KB
 
 router = APIRouter()
 
+
+async def _resolve_bank_problems(bank_ids: list[str]) -> list[dict]:
+    """Fetch problems referenced by id from the shared problem bank, preserving order."""
+    if not bank_ids:
+        return []
+    bank_docs = await db["problems"].find({"id": {"$in": bank_ids}}, {"_id": 0}).to_list(length=len(bank_ids))
+    bank_by_id = {d["id"]: d for d in bank_docs}
+    missing = [bid for bid in bank_ids if bid not in bank_by_id]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Problemas no encontrados en el banco: {', '.join(missing)}")
+    return [bank_by_id[bid] for bid in bank_ids]
+
+
 @router.post("/create")
 async def create_competition(req: RequestCompetition, _user: dict = Depends(require_admin)):
     # Validación de campos obligatorios
@@ -32,12 +45,22 @@ async def create_competition(req: RequestCompetition, _user: dict = Depends(requ
     dict_req = req.dict()
     dict_req['id'] = str(uuid.uuid4())
 
-    # Strip testCases from problems before building Competition (test cases stored separately)
-    # and ensure every problem has an id (Problem.id is required; ProblemCreate.id is optional)
-    for p in dict_req.get("problems", []):
-        p.pop("testCases", None)
+    # Problemas inline: separar testCases (se persisten aparte) y asegurar id
+    # (Problem.id es obligatorio; ProblemCreate.id es opcional).
+    inline_test_cases: dict[str, list] = {}
+    for orig, p in zip(req.problems, dict_req.get("problems", [])):
+        test_cases = p.pop("testCases", None)
         if not p.get("id"):
             p["id"] = str(uuid.uuid4())
+        if orig.testCases:
+            inline_test_cases[p["id"]] = [tc.dict() for tc in orig.testCases]
+
+    # Problemas referenciados del banco (`problem_ids`): sus test cases ya viven
+    # en la colección `testcases` bajo el mismo id, no hay nada que copiar.
+    bank_ids = dict_req.pop("problem_ids", []) or []
+    bank_problems = await _resolve_bank_problems(bank_ids)
+
+    dict_req["problems"] = bank_problems + dict_req.get("problems", [])
 
     # Validar y transformar el modelo
     try:
@@ -65,18 +88,15 @@ async def create_competition(req: RequestCompetition, _user: dict = Depends(requ
         logger.exception("Error al guardar la competición en la base de datos")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-    # Extraer y guardar casos de prueba en colección separada (nunca expuestos al cliente).
-    # Empareja por posición: dict_req["problems"] y req.problems mantienen el mismo orden
-    # y dict_req ya tiene los ids definitivos asignados arriba (matching por title era
-    # ambiguo si dos problemas compartían título).
-    for orig_problem, stored_problem in zip(req.problems, dict_req.get("problems", [])):
-        if orig_problem.testCases:
-            prob_id = stored_problem["id"]
-            await db["testcases"].replace_one(
-                {"problemId": prob_id},
-                {"problemId": prob_id, "cases": [tc.dict() for tc in orig_problem.testCases]},
-                upsert=True,
-            )
+    # Guardar los test cases de los problemas inline en colección separada (nunca
+    # expuestos al cliente). Los problemas de banco ya tienen sus casos guardados
+    # bajo el mismo id, no hace falta volver a escribirlos.
+    for prob_id, cases in inline_test_cases.items():
+        await db["testcases"].replace_one(
+            {"problemId": prob_id},
+            {"problemId": prob_id, "cases": cases},
+            upsert=True,
+        )
 
     return {
         "message": "Competición creada exitosamente",
@@ -542,9 +562,10 @@ async def update_competition(
     if not update_data:
         raise HTTPException(status_code=400, detail="No se proporcionaron campos para actualizar")
 
-    # Handle problems update: strip testCases, upsert them separately
-    if "problems" in update_data:
-        raw_problems = update_data["problems"]
+    # Handle problems update: strip testCases, upsert them separately, and resolve
+    # any bank-referenced problem_ids alongside inline problems.
+    if "problems" in update_data or "problem_ids" in update_data:
+        raw_problems = update_data.pop("problems", [])
         clean_problems = []
         for p in raw_problems:
             test_cases = p.pop("testCases", [])
@@ -557,7 +578,11 @@ async def update_competition(
                     {"problemId": prob_id, "cases": test_cases},
                     upsert=True,
                 )
-        update_data["problems"] = clean_problems
+
+        bank_ids = update_data.pop("problem_ids", []) or []
+        bank_problems = await _resolve_bank_problems(bank_ids)
+
+        update_data["problems"] = bank_problems + clean_problems
 
     try:
         await db["competition"].update_one(
@@ -569,4 +594,17 @@ async def update_competition(
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
     return {"message": "Competición actualizada", "id": competitionId}
+
+
+@router.delete("/{competitionId}")
+async def delete_competition(competitionId: str, _user: dict = Depends(require_admin)):
+    """Admin endpoint to permanently delete a competition and its maze data."""
+    result = await db["competition"].delete_one({"id": competitionId})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Competición no encontrada")
+
+    await db["maze_configs"].delete_one({"competitionId": competitionId})
+    await db["maze_progress"].delete_many({"competitionId": competitionId})
+
+    return {"message": "Competición eliminada", "id": competitionId}
 
