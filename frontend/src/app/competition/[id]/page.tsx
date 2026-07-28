@@ -18,6 +18,7 @@ import {
   CheckCircle,
   AlertCircle,
   Filter,
+  Eye,
   EyeOff,
   Users,
   UserPlus,
@@ -662,12 +663,17 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
                           </DropdownMenuContent>
                         </DropdownMenu>
                         <Button
-                          variant="outline" size="sm"
+                          variant={hideCompleted ? "default" : "outline"}
+                          size="sm"
+                          aria-pressed={hideCompleted}
                           onClick={() => setHideCompleted(!hideCompleted)}
-                          className={hideCompleted ? "bg-accent text-accent-foreground" : ""}
                         >
-                          <EyeOff className="mr-2 h-4 w-4" />
-                          Ocultar Resueltos
+                          {hideCompleted ? (
+                            <EyeOff className="mr-2 h-4 w-4" />
+                          ) : (
+                            <Eye className="mr-2 h-4 w-4" />
+                          )}
+                          {hideCompleted ? "Resueltos ocultos" : "Ocultar Resueltos"}
                         </Button>
                       </div>
                     </div>
