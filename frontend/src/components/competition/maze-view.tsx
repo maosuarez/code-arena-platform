@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -42,15 +42,27 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, onMove, 
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; panStartX: number; panStartY: number; moved: boolean } | null>(null)
   const suppressClickRef = useRef(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
 
   const zoomBy = (factor: number) => setScale(prev => Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev * factor)))
   const resetView = () => { setScale(1); setPan({ x: 0, y: 0 }) }
 
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    const factor = e.deltaY < 0 ? 1.1 : 0.9
-    setScale(prev => Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev * factor)))
-  }
+  // React attaches its synthetic onWheel listener as passive, so
+  // preventDefault() there can't stop the page from scrolling — it only warns
+  // in the console while the page scrolls and the maze zooms at the same
+  // time. A native listener with { passive: false } is the only way to
+  // actually block page scroll on wheel over the maze.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const factor = e.deltaY < 0 ? 1.1 : 0.9
+      setScale(prev => Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev * factor)))
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => el.removeEventListener("wheel", onWheel)
+  }, [])
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -202,9 +214,9 @@ export default function MazeView({ mazeState, myTeamCode, onUnlockDoor, onMove, 
         {/* SVG Maze */}
         <div className="lg:col-span-2">
           <div
+            ref={containerRef}
             className="relative border rounded-xl bg-muted/20 p-2 overflow-hidden select-none"
             style={{ height: 480, touchAction: "none" }}
-            onWheel={handleWheel}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
