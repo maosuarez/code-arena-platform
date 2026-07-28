@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.database import db
 from app.models_entity.maze import MazeConfig
 from app.routes.auth import get_current_user, require_admin
+from app.services.competition_lifecycle import sync_competition_status
 from app.services.websocket_manager import manager
 
 router = APIRouter()
@@ -140,6 +141,7 @@ async def _require_active_competition(competitionId: str) -> dict:
     competition = await db["competition"].find_one({"id": competitionId})
     if not competition:
         raise HTTPException(status_code=404, detail="Competencia no encontrada")
+    competition = await sync_competition_status(competition)
     status = competition.get("status")
     if status != "active":
         if status == "completed":

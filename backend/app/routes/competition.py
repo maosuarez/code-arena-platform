@@ -607,6 +607,16 @@ async def update_competition(
 
         update_data["problems"] = bank_problems + clean_problems
 
+    # Recompute status from the resulting dates instead of trusting whatever
+    # `status` the client sent — the admin dashboard always includes the value
+    # that was current when the edit dialog opened, which goes stale the
+    # moment start/end time change (e.g. editing an "upcoming" competition to
+    # start now doesn't flip its dropdown to "active"). compute_effective_status
+    # still honors an explicit "completed"/"inactive" in the payload, so
+    # intentional terminal states are preserved.
+    merged = {**existing, **update_data}
+    update_data["status"] = compute_effective_status(merged)
+
     try:
         await db["competition"].update_one(
             {"id": competitionId},
