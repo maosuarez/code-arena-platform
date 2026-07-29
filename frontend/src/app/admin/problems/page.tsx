@@ -380,6 +380,16 @@ export default function ProblemBankPage() {
                     <div className="text-xs font-mono bg-muted/40 p-2 rounded mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap">
                       {p.statement}
                     </div>
+                    {p.hidden_instructions && (
+                      <div className="mt-2">
+                        <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase mb-1">
+                          Instrucción oculta anti-trampa
+                        </p>
+                        <div className="text-xs font-mono bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 p-2 rounded max-h-40 overflow-y-auto whitespace-pre-wrap">
+                          {p.hidden_instructions}
+                        </div>
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground mt-2">id: {p.id}</p>
                   </div>
                 )}
