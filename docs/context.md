@@ -1,8 +1,8 @@
 # Domain Context — Code Arena Unisabana
 
 Plataforma de competencias de programación para equipos universitarios.
-Los problemas son de LeetCode; los estudiantes los resuelven fuera de la plataforma
-y registran su solución manualmente desde la UI.
+Los problemas son propios de la plataforma (enunciado + casos de prueba ocultos)
+y se evalúan automáticamente vía Judge0.
 
 ## Entidades clave
 
@@ -11,7 +11,7 @@ y registran su solución manualmente desde la UI.
 | User | `users` | Tiene `teamCode` que lo vincula a un equipo |
 | TeamCode | `teams` | `code` único, `points` acumulados, `submissions[]` |
 | Competition | `competition` | Tiene `teams[]` (códigos), `problems[]`, `scoring`, `podium[]` (si activo laberinto) |
-| Problem | embebido en Competition | `difficulty: easy/medium/hard`, `slug` de LeetCode, `hidden_instructions` (anti-AI) |
+| Problem | embebido en Competition | `difficulty: easy/medium/hard`, `statement`, `testCases[]` (`testcases` collection), `hidden_instructions` (anti-AI) |
 | Submission | embebido en TeamCode | `status` siempre `"AC"`, `time` en segundos desde inicio |
 | MazeConfig | `maze_configs` | `nodes[]`, `doors[]`, `startNodeId`, `goalNodeId` |
 | MazeProgress | `maze_progress` | `currentNodeId`, `unlockedDoors[]`, `spentPoints`, `earnedPoints` por equipo |
@@ -45,7 +45,7 @@ y registran su solución manualmente desde la UI.
 
 ## Reglas de negocio
 
-- **Submissions**: La plataforma no valida si el problema realmente fue resuelto en LeetCode; confía en el usuario.
+- **Submissions**: El código se valida contra los casos de prueba del problema vía Judge0 (ver "Validación de Submissions" abajo).
 - **Puntuación**: `easy/medium/hard` → valores configurables por competencia.
 - **Ranking**: `ORDER BY points DESC, totalTime ASC`. `totalTime` = tiempo del último AC del equipo.
 - **Equipos**: `maxMembers` definido en el equipo. Un equipo puede estar en múltiples competencias.
@@ -186,6 +186,5 @@ Ambos hooks manejan reconexión automática (10 segundos de retraso) y detectan 
 - **MongoDB**: Motor async. En local se levanta como contenedor Docker (`mongo:7`). En producción puede apuntar a cualquier instancia externa via `MONGO_URL`.
 - **MQTT**: Broker MQTT para eventos en tiempo real (ej. Mosquitto o servicio en la nube). Variables de entorno: `MQTT_HOST`, `MQTT_WS_PORT`, `MQTT_WS_PATH`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_TOPIC_PREFIX`.
 - **Judge0**: API de ejecución de código (solo si `JUDGE0_API_KEY` está configurada). Si no está disponible, usa modo fallback.
-- **LeetCode**: `services/leetcode_api.py` — actualmente vacío; futura validación automática de ACs.
-- **Azure App Service**: backend en producción (`api-code-arena.azurewebsites.net`).
-- **Azure Static Web Apps**: frontend en producción.
+- **Vercel**: backend y frontend en producción (un solo `vercel.json` en la raíz define ambos servicios; deploy automático al hacer push a `main`).
+- **MongoDB Atlas**: base de datos en producción (tier M0 gratuito).

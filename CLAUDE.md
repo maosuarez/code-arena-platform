@@ -43,7 +43,7 @@ Requires `NEXT_PUBLIC_BASE_URL` env var pointing to the backend URL.
 - `database.py` — Motor async MongoDB client via `MONGO_URL`/`MONGO_DB`
 - `routes/` — One file per domain: `auth`, `users`, `teams`, `competition`, `ranking`
 - `models_entity/` — Pydantic v2 models: `users`, `teams`, `competition`, `general`
-- `services/` — `leetcode_api.py` (external), `users.py` (helpers), `scoring.py`
+- `services/` — `judge0.py` (code evaluation sandbox), `users.py` (helpers), `scoring.py`
 - Auth: JWT (HS256, 120 min) via `python-jose`. `get_current_user` dependency in `auth.py` is reused across protected routes.
 
 **Frontend** (`frontend/src/`):

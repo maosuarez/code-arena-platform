@@ -7,7 +7,6 @@ class User(BaseModel):
     username: str
     email: EmailStr
     teamCode: Optional[str] = None
-    leetcode_username: Optional[str] = None
     password: str
     is_admin: bool = False
 

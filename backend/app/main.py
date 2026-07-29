@@ -44,7 +44,6 @@ async def seed_admin():
                 "password": get_password_hash(admin_password),
                 "is_admin": True,
                 "teamCode": None,
-                "leetcode_username": None,
             }
         },
         upsert=True,

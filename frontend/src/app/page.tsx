@@ -184,7 +184,7 @@ export default function HomePage() {
             Bienvenido a <span className="text-accent animate-pulse">CodeArena</span>
           </h1>
           <p className="text-xl text-muted-foreground text-balance max-w-2xl mx-auto leading-relaxed">
-            Compite en equipos, resuelve problemas de LeetCode y demuestra tus habilidades de programación en tiempo
+            Compite en equipos, resuelve problemas de programación y demuestra tus habilidades en tiempo
             real
           </p>
         </div>

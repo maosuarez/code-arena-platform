@@ -153,7 +153,7 @@ export default function CompetitionPage({ params }: { params: Promise<{ id: stri
   const [helpModalOpen, setHelpModalOpen] = useState(false)
   const [competitionData, setCompetitionData] = useState<Competition>({} as Competition)
   const [problems, setProblems] = useState<Problem[]>([])
-  const [members, setMembers] = useState<{ id: string; username: string; leetcode: string }[]>([])
+  const [members, setMembers] = useState<{ id: string; username: string }[]>([])
   const [teamPoints, setTeamPoints] = useState(0)
   const [teamRanking, setTeamRanking] = useState<number | null>(null)
   const [totalTeams, setTotalTeams] = useState(0)

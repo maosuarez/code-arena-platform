@@ -18,7 +18,6 @@ class UserOut(BaseModel):
     id: int
     username: str
     email: str
-    leetcode_username: Optional[str]
 
     class Config:
         orm_mode = True

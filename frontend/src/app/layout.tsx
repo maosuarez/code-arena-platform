@@ -13,7 +13,7 @@ import "./globals.css"
 
 export const metadata: Metadata = {
   title: "CodeArena - Competencias de Programación",
-  description: "Plataforma de competencias de programación con problemas de LeetCode",
+  description: "Plataforma de competencias de programación con evaluación automática vía Judge0",
   generator: "v0.app",
 }
 

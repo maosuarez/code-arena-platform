@@ -297,7 +297,6 @@ async def get_competition_private(
                 {
                     "id": str(member.get("_id")),
                     "username": member.get("username"),
-                    "leetcode": member.get("leetcode")
                 }
                 async for member in members_cursor
             ]

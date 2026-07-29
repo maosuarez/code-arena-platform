@@ -1,6 +1,6 @@
 # Code Arena Unisabana
 
-Plataforma de competencias de programación para equipos universitarios de la Universidad de la Sabana. Los estudiantes resuelven problemas de LeetCode, registran sus soluciones y compiten en un ranking en tiempo real con evaluación automática via Judge0 y actualizaciones via WebSocket (MQTT).
+Plataforma de competencias de programación para equipos universitarios de la Universidad de la Sabana. Los estudiantes resuelven problemas propios de la plataforma, registran sus soluciones y compiten en un ranking en tiempo real con evaluación automática via Judge0 y actualizaciones via WebSocket (MQTT).
 
 ## ¿Qué es Code Arena?
 
@@ -10,7 +10,7 @@ Sistema integral para gestionar competencias de programación. Los equipos se in
 
 **Backend**: FastAPI + Python, MongoDB (Motor async), JWT HS256, Judge0 sandbox, MQTT  
 **Frontend**: Next.js 15 + TypeScript, shadcn/ui, Tailwind CSS v4, MQTT WebSocket  
-**Infraestructura**: Docker Compose (local), Azure App Service (backend), Azure Static Web Apps (frontend)
+**Infraestructura**: Docker Compose (local), Vercel (backend + frontend), MongoDB Atlas (producción)
 
 ## Estructura
 
@@ -37,7 +37,7 @@ code-arena-unisabana/
 
 - **Autenticación JWT** (120 min, HS256) con bcrypt password hashing
 - **Gestión de equipos** con código único y límite de miembros configurable
-- **Competencias** con problemas LeetCode, scoring flexible por dificultad
+- **Competencias** con problemas propios evaluados via Judge0, scoring flexible por dificultad
 - **Judge0 integrado** para evaluación automática (Python, Java, C++, JavaScript)
 - **Maze/Laberinto** con evaluación automática de código
 - **Ranking real-time** via MQTT WebSocket sin recargar página
@@ -47,7 +47,7 @@ code-arena-unisabana/
 
 ## Reglas de dominio clave
 
-- **Submissions**: Status siempre es `AC` (accepted). Sin validación automática de LeetCode.
+- **Submissions**: Status siempre es `AC` (accepted). Evaluación de código via Judge0.
 - **Scoring**: Puntos según `competition.scoring[difficulty]`. Suma acumulada en `team.points`.
 - **Ranking**: Ordena por `points DESC`, luego `totalTime ASC`.
 - **Equipos**: Pueden estar en múltiples competencias. Vinculados via `teamCode` en perfil usuario.
@@ -88,7 +88,7 @@ Incluye requisitos previos, configuración de servicios externos, variables de e
 ## Esquema de datos
 
 ```
-User: {username, email, password, teamCode, leetcode_username, is_admin}
+User: {username, email, password, teamCode, is_admin}
 TeamCode: {code, points, members[], submissions[{problemId, time, difficulty, points}]}
 Competition: {name, date, duration, problems[], scoring{easy/medium/hard}, teams[], createdBy}
 ```

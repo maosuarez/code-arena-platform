@@ -4,7 +4,6 @@ export interface User {
   username: string
   email: string
   teamCode: string
-  leetcode_username: string
   is_admin: boolean
 }
 
